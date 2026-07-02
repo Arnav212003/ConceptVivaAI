@@ -1528,3 +1528,299 @@ Return only valid JSON in this exact format:
 
     except Exception:
         return fallback_dsa_evaluation(request.topic, request.solution, runner_result)
+
+
+class ProjectChallengeRequest(BaseModel):
+    domain: str = "Machine Learning"
+    topic: str = "Linear Regression"
+    difficulty: str = "Beginner"
+
+
+class ProjectSubmissionRequest(BaseModel):
+    domain: str = "Machine Learning"
+    topic: str = "Linear Regression"
+    difficulty: str = "Beginner"
+    challenge: dict
+    submission: str
+
+
+def get_fallback_project_challenge(domain, topic, difficulty):
+    return {
+        "project_title": f"{topic} Mini Project Challenge",
+        "domain": domain,
+        "topic": topic,
+        "difficulty": difficulty,
+        "problem_statement": (
+            f"Build a beginner-friendly project using {topic}. "
+            "Your goal is to understand the concept, apply it on a simple dataset, "
+            "evaluate the result, and explain your approach clearly."
+        ),
+        "dataset_columns": [
+            {"column": "feature_1", "description": "First input feature"},
+            {"column": "feature_2", "description": "Second input feature"},
+            {"column": "target", "description": "Output variable to predict or analyze"},
+        ],
+        "tasks": [
+            "Understand the problem statement.",
+            "Create or load a small dataset.",
+            "Clean the data and handle missing values.",
+            f"Apply {topic} correctly.",
+            "Evaluate the output using suitable metrics.",
+            "Write a short explanation of your approach and result.",
+        ],
+        "evaluation_metrics": [
+            "Correct use of selected concept",
+            "Data preprocessing quality",
+            "Model or solution logic",
+            "Evaluation and interpretation",
+            "Clarity of explanation",
+        ],
+        "hints": [
+            "Start with a very small dataset.",
+            "Explain every step in simple words.",
+            "Mention why this concept is suitable for the problem.",
+        ],
+        "submission_checklist": [
+            "Problem understanding",
+            "Dataset columns",
+            "Approach or code",
+            "Output/result",
+            "Evaluation metric",
+            "Conclusion",
+        ],
+    }
+
+
+def generate_project_challenge_with_gemini(domain, topic, difficulty):
+    if not GEMINI_API_KEY or not client:
+        return get_fallback_project_challenge(domain, topic, difficulty)
+
+    prompt = f"""
+You are ConceptVivaAI, an AI assessment platform.
+
+Generate a project-based challenge for a student.
+
+Domain: {domain}
+Topic: {topic}
+Difficulty: {difficulty}
+
+The challenge should be practical, beginner-friendly if difficulty is Beginner,
+and should feel like a mini hackathon/project assignment.
+
+Return only valid JSON in this exact format:
+{{
+  "project_title": "clear project title",
+  "domain": "{domain}",
+  "topic": "{topic}",
+  "difficulty": "{difficulty}",
+  "problem_statement": "detailed but simple problem statement",
+  "dataset_columns": [
+    {{
+      "column": "column_name",
+      "description": "what this column means"
+    }}
+  ],
+  "tasks": [
+    "task 1",
+    "task 2",
+    "task 3"
+  ],
+  "evaluation_metrics": [
+    "metric or evaluation point 1",
+    "metric or evaluation point 2"
+  ],
+  "hints": [
+    "hint 1",
+    "hint 2"
+  ],
+  "submission_checklist": [
+    "checklist item 1",
+    "checklist item 2"
+  ]
+}}
+
+Rules:
+1. Stay strictly inside the selected topic.
+2. Do not give the full solution.
+3. Do not provide complete code.
+4. Give a dataset/table schema.
+5. Make it useful for portfolio/project practice.
+6. Keep it clear for students.
+"""
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
+
+        result = extract_json(response.text)
+
+        if not result:
+            return get_fallback_project_challenge(domain, topic, difficulty)
+
+        result.setdefault("project_title", f"{topic} Mini Project Challenge")
+        result.setdefault("domain", domain)
+        result.setdefault("topic", topic)
+        result.setdefault("difficulty", difficulty)
+        result.setdefault("problem_statement", "Project problem statement not available.")
+        result.setdefault("dataset_columns", [])
+        result.setdefault("tasks", [])
+        result.setdefault("evaluation_metrics", [])
+        result.setdefault("hints", [])
+        result.setdefault("submission_checklist", [])
+
+        return result
+
+    except Exception:
+        return get_fallback_project_challenge(domain, topic, difficulty)
+
+
+def evaluate_project_submission_with_gemini(
+    domain,
+    topic,
+    difficulty,
+    challenge,
+    submission
+):
+    if not GEMINI_API_KEY or not client:
+        return {
+            "score": 6,
+            "verdict": "PARTIAL",
+            "feedback": "Your project submission was received. Gemini API is unavailable right now, so this is fallback feedback.",
+            "missing_points": "Detailed AI review could not run. Make sure your submission includes dataset, preprocessing, approach, evaluation, and conclusion.",
+            "improved_approach": "Use a clear structure: problem understanding, dataset columns, preprocessing, model/logic, evaluation metric, result interpretation, and conclusion.",
+            "next_steps": "Add code, evaluate results, explain limitations, and improve the project for portfolio use.",
+            "suggested_resources": [
+                "Revise the selected concept",
+                "Practice one small dataset-based implementation",
+                "Write a short project report"
+            ],
+        }
+
+    prompt = f"""
+You are ConceptVivaAI, a strict but helpful project evaluator.
+
+Evaluate the student's project submission.
+
+Domain:
+{domain}
+
+Topic:
+{topic}
+
+Difficulty:
+{difficulty}
+
+Project Challenge:
+{json.dumps(challenge, indent=2)}
+
+Student Submission:
+{submission}
+
+Evaluate:
+1. Whether the student understood the problem.
+2. Whether the approach is correct for the selected topic.
+3. Whether dataset/table understanding is present.
+4. Whether preprocessing/model/evaluation steps are clear.
+5. Whether the explanation is portfolio-ready.
+6. Missing technical points.
+7. Give an improved project approach.
+
+Return only valid JSON in this exact format:
+{{
+  "score": number from 0 to 10,
+  "verdict": "STRONG or PARTIAL or WEAK",
+  "feedback": "clear feedback about what is correct and incorrect",
+  "missing_points": "important missing points",
+  "improved_approach": "better project approach in simple steps",
+  "next_steps": "what student should do next",
+  "suggested_resources": [
+    "resource or topic 1",
+    "resource or topic 2"
+  ]
+}}
+
+Scoring guide:
+0-2: unrelated or empty submission.
+3-4: weak understanding with very little correct structure.
+5-6: basic idea present but incomplete.
+7-8: good project approach with minor missing points.
+9-10: strong, clear, portfolio-ready project approach.
+"""
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
+
+        result = extract_json(response.text)
+
+        if not result:
+            return {
+                "score": 6,
+                "verdict": "PARTIAL",
+                "feedback": "AI reviewed the project, but response JSON was not perfect.",
+                "missing_points": "Add more structure, metrics, dataset explanation, and conclusion.",
+                "improved_approach": "Explain the problem, dataset, preprocessing, model/logic, metric, result, limitation, and improvement.",
+                "next_steps": "Improve project explanation and add proper evaluation.",
+                "suggested_resources": [
+                    "Selected concept revision",
+                    "Project report writing",
+                    "Model evaluation metrics"
+                ],
+            }
+
+        result.setdefault("score", 6)
+        result.setdefault("verdict", "PARTIAL")
+        result.setdefault("feedback", "Your project was evaluated by AI.")
+        result.setdefault("missing_points", "Mention dataset, preprocessing, evaluation, and conclusion.")
+        result.setdefault("improved_approach", "Use a structured project approach.")
+        result.setdefault("next_steps", "Improve your project and resubmit.")
+        result.setdefault("suggested_resources", [])
+
+        return result
+
+    except Exception:
+        return {
+            "score": 6,
+            "verdict": "PARTIAL",
+            "feedback": "Gemini API failed while evaluating the project submission.",
+            "missing_points": "Could not check detailed missing points right now.",
+            "improved_approach": "Use a clear structure: problem, dataset, preprocessing, approach, evaluation, result, conclusion.",
+            "next_steps": "Try again after backend/Gemini is available.",
+            "suggested_resources": [
+                "Concept revision",
+                "Project-based ML practice",
+                "Evaluation metrics"
+            ],
+        }
+
+
+@app.post("/generate-project-challenge")
+def generate_project_challenge(request: ProjectChallengeRequest):
+    challenge = generate_project_challenge_with_gemini(
+        domain=request.domain,
+        topic=request.topic,
+        difficulty=request.difficulty
+    )
+
+    return {
+        "mode": "project_challenge",
+        "challenge": challenge,
+        "message": "Project challenge generated successfully.",
+    }
+
+
+@app.post("/evaluate-project-submission")
+def evaluate_project_submission(request: ProjectSubmissionRequest):
+    review = evaluate_project_submission_with_gemini(
+        domain=request.domain,
+        topic=request.topic,
+        difficulty=request.difficulty,
+        challenge=request.challenge,
+        submission=request.submission
+    )
+
+    return review

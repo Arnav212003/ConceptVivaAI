@@ -1,35 +1,82 @@
-export default function ResultCard({ result }) {
-  if (!result) return null;
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+export default function Navbar() {
+  const pathname = usePathname();
+
+  function isActive(path) {
+    return pathname === path;
+  }
 
   return (
-    <div className="mt-6 rounded-2xl border border-emerald-400/30 bg-emerald-950/30 p-5">
-      <h3 className="mb-3 text-xl font-semibold text-emerald-300">
-        AI Evaluation Result
-      </h3>
+    <header className="sticky top-0 z-50 border-b border-slate-800 bg-slate-950/90 backdrop-blur-xl">
+      <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 text-white">
+        <Link href="/" className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-pink-500 text-xl font-black text-white shadow-lg">
+            CV
+          </div>
 
-      <div className="mb-4">
-        <p className="text-sm text-slate-400">Score</p>
-        <p className="text-3xl font-bold text-white">{result.score}/10</p>
-      </div>
+          <div>
+            <h1 className="text-xl font-extrabold leading-none">
+              ConceptVivaAI
+            </h1>
+            <p className="mt-1 text-xs text-slate-400">
+              AI Interview & DSA Coach
+            </p>
+          </div>
+        </Link>
 
-      <div className="mb-4">
-        <p className="text-sm text-slate-400">Feedback</p>
-        <p className="text-slate-200">{result.feedback}</p>
-      </div>
+        <div className="hidden items-center gap-2 md:flex">
+          <Link
+            href="/"
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+              isActive("/")
+                ? "bg-slate-800 text-white"
+                : "text-slate-300 hover:bg-slate-900 hover:text-white"
+            }`}
+          >
+            Home
+          </Link>
 
-      <div className="mb-4">
-        <p className="text-sm text-slate-400">Improvement Tip</p>
-        <p className="text-slate-200">{result.improvement}</p>
-      </div>
+          <Link
+            href="/ml"
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+              isActive("/ml")
+                ? "bg-cyan-500/20 text-cyan-300"
+                : "text-slate-300 hover:bg-slate-900 hover:text-white"
+            }`}
+          >
+            ML Interview
+          </Link>
 
-      {result.follow_up_question && (
-        <div className="mt-5 rounded-xl border border-indigo-400/30 bg-indigo-950/40 p-4">
-          <p className="text-sm text-indigo-300">Follow-up Question</p>
-          <p className="mt-2 text-lg font-semibold text-white">
-            {result.follow_up_question}
-          </p>
+          <Link
+            href="/dsa"
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+              isActive("/dsa")
+                ? "bg-pink-500/20 text-pink-300"
+                : "text-slate-300 hover:bg-slate-900 hover:text-white"
+            }`}
+          >
+            DSA Practice
+          </Link>
         </div>
-      )}
-    </div>
+
+        <div className="md:hidden">
+          <select
+            value={pathname}
+            onChange={(e) => {
+              window.location.href = e.target.value;
+            }}
+            className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none"
+          >
+            <option value="/">Home</option>
+            <option value="/ml">ML Interview</option>
+            <option value="/dsa">DSA Practice</option>
+          </select>
+        </div>
+      </nav>
+    </header>
   );
 }

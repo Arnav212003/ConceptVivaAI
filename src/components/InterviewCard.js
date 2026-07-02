@@ -20,7 +20,10 @@ export default function InterviewCard() {
   const [finalReport, setFinalReport] = useState(null);
 
   const recognitionRef = useRef(null);
+  const keepListeningRef = useRef(false);
+  const transcriptRef = useRef("");
   const maxRounds = 5;
+  
 
   useEffect(() => {
     const savedHistory = localStorage.getItem("conceptviva_interview_history");
@@ -75,46 +78,98 @@ export default function InterviewCard() {
   }
 
   function startListening() {
-    const recognition = getSpeechRecognition();
+  const recognition = getSpeechRecognition();
 
-    if (!recognition) {
-      alert("Speech recognition is not supported in this browser. Use Chrome.");
-      return;
+  if (!recognition) {
+    alert("Speech recognition is not supported in this browser. Use Chrome or Edge.");
+    return;
+  }
+
+  stopSpeaking();
+
+  if (recognitionRef.current) {
+    try {
+      recognitionRef.current.stop();
+    } catch (error) {}
+  }
+
+  keepListeningRef.current = true;
+  transcriptRef.current = answer ? `${answer.trim()} ` : "";
+
+  recognitionRef.current = recognition;
+
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = "en-US";
+
+  recognition.onstart = () => {
+    setIsListening(true);
+  };
+
+  recognition.onresult = (event) => {
+    let finalText = "";
+    let interimText = "";
+
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const spokenText = event.results[i][0].transcript;
+
+      if (event.results[i].isFinal) {
+        finalText += `${spokenText} `;
+      } else {
+        interimText += spokenText;
+      }
     }
 
-    recognitionRef.current = recognition;
+    if (finalText.trim()) {
+      transcriptRef.current += finalText;
+    }
 
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = "en-US";
+    setAnswer((transcriptRef.current + interimText).trim());
+  };
 
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
+  recognition.onerror = (event) => {
+    console.log("Speech recognition error:", event.error);
 
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      setAnswer(transcript);
-    };
-
-    recognition.onerror = () => {
+    if (
+      event.error === "not-allowed" ||
+      event.error === "service-not-allowed"
+    ) {
+      keepListeningRef.current = false;
       setIsListening(false);
-    };
+      alert("Microphone permission is blocked. Please allow microphone permission.");
+    }
+  };
 
-    recognition.onend = () => {
+  recognition.onend = () => {
+    if (keepListeningRef.current) {
+      setTimeout(() => {
+        try {
+          recognition.start();
+        } catch (error) {}
+      }, 300);
+    } else {
       setIsListening(false);
-    };
+    }
+  };
 
+  try {
     recognition.start();
+  } catch (error) {
+    console.log("Mic start error:", error);
   }
+}
 
   function stopListening() {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
+  keepListeningRef.current = false;
 
-    setIsListening(false);
+  if (recognitionRef.current) {
+    try {
+      recognitionRef.current.stop();
+    } catch (error) {}
   }
+
+  setIsListening(false);
+}
 
   function resetInterview() {
     stopSpeaking();

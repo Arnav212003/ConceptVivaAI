@@ -1,4 +1,7 @@
-const PYTHON_BACKEND_URL = "http://127.0.0.1:8000";
+const PYTHON_BACKEND_URL =
+  process.env.PYTHON_BACKEND_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "http://127.0.0.1:8000";
 
 export async function POST(request) {
   try {
@@ -63,4 +66,4 @@ export async function POST(request) {
       }
     );
   }
-}
+} 
