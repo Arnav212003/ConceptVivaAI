@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  apiFetchWithSessionRetry,
+  ensureConceptVivaSession,
+} from "@/utils/session";
 
 export default function MLPracticeCard() {
-  const [topic, setTopic] = useState("Linear Regression");
+  const [topic, setTopic] = useState("");
+  const [activeTopic, setActiveTopic] = useState("AI Selected ML Topic");
   const [level, setLevel] = useState("Easy");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
@@ -20,14 +25,64 @@ export default function MLPracticeCard() {
     }
   }, []);
 
-  function saveAttempt(resultData) {
+  function getTopicForRequest() {
+    const cleanTopic = topic.trim();
+
+    if (cleanTopic) {
+      return cleanTopic;
+    }
+
+    return `
+Machine Learning interview practice.
+
+The user did not select a fixed topic.
+You must choose one useful ML interview topic yourself from areas like:
+- ML basics
+- supervised learning
+- unsupervised learning
+- regression
+- classification
+- Linear Regression
+- Logistic Regression
+- KNN
+- Decision Trees
+- overfitting and underfitting
+- bias variance tradeoff
+- train test split
+- feature scaling
+- model evaluation metrics
+- confusion matrix
+- precision, recall, F1 score
+
+Ask only one clear interview question.
+Do not reveal the answer.
+`;
+  }
+
+  function getTopicForDisplay() {
+    const cleanTopic = topic.trim();
+
+    if (cleanTopic) {
+      return cleanTopic;
+    }
+
+    return "AI Selected ML Topic";
+  }
+
+  function resetCurrentAttempt() {
+    setQuestion("");
+    setAnswer("");
+    setResult(null);
+  }
+
+  async function saveAttempt(resultData) {
     const now = new Date();
 
     const attempt = {
       id: Date.now(),
       date: now.toLocaleDateString(),
       time: now.toLocaleTimeString(),
-      topic,
+      topic: activeTopic,
       level,
       question,
       score: resultData.score ?? 0,
@@ -41,6 +96,33 @@ export default function MLPracticeCard() {
       "conceptviva_ml_practice_history",
       JSON.stringify(updated)
     );
+
+    try {
+      const session = await ensureConceptVivaSession();
+
+      await apiFetchWithSessionRetry("/api/interview", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "save",
+          session_id: session.sessionId,
+          topic: activeTopic,
+          level,
+          question,
+          answer,
+          score: resultData.score ?? 0,
+          verdict: resultData.verdict || "PARTIAL",
+          feedback: resultData.feedback || "",
+          missing_points: resultData.missing_points || "",
+          corrected_answer: resultData.corrected_answer || "",
+          improvement: resultData.improvement || "",
+        }),
+      });
+    } catch (error) {
+      console.error("ML practice backend save failed:", error);
+    }
   }
 
   function clearHistory() {
@@ -54,21 +136,34 @@ export default function MLPracticeCard() {
     setAnswer("");
     setResult(null);
 
+    const topicForRequest = getTopicForRequest();
+    const topicForDisplay = getTopicForDisplay();
+
+    setActiveTopic(topicForDisplay);
+
     try {
-      const response = await fetch("/api/interview", {
+      const response = await apiFetchWithSessionRetry("/api/interview", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           action: "question",
-          topic,
+          topic: topicForRequest,
           level,
         }),
       });
 
       const data = await response.json();
 
-      setQuestion(data.question || `Explain ${topic} in simple words.`);
+      setQuestion(
+        data.question ||
+          "Can you explain one important Machine Learning concept with an example?"
+      );
     } catch (error) {
-      setQuestion(`Explain ${topic} in simple words.`);
+      setQuestion(
+        "Can you explain one important Machine Learning concept with an example?"
+      );
     }
 
     setLoadingQuestion(false);
@@ -88,12 +183,20 @@ export default function MLPracticeCard() {
     setLoadingEvaluation(true);
     setResult(null);
 
+    const topicForEvaluation =
+      activeTopic === "AI Selected ML Topic"
+        ? getTopicForRequest()
+        : activeTopic;
+
     try {
-      const response = await fetch("/api/interview", {
+      const response = await apiFetchWithSessionRetry("/api/interview", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           action: "evaluate",
-          topic,
+          topic: topicForEvaluation,
           level,
           question,
           answer,
@@ -113,11 +216,11 @@ export default function MLPracticeCard() {
         improvement: data.improvement || "Improve answer structure.",
         follow_up_question:
           data.follow_up_question ||
-          `Can you explain one real-world use case of ${topic}?`,
+          "Can you explain this ML concept with one real-world example?",
       };
 
       setResult(resultData);
-      saveAttempt(resultData);
+      await saveAttempt(resultData);
     } catch (error) {
       const resultData = {
         score: 0,
@@ -126,11 +229,12 @@ export default function MLPracticeCard() {
         missing_points: "Could not check missing points.",
         corrected_answer: "Backend connection issue. Try again.",
         improvement: "Check API route and Python backend.",
-        follow_up_question: `Can you explain ${topic} with one example?`,
+        follow_up_question:
+          "Can you explain this ML concept with one simple example?",
       };
 
       setResult(resultData);
-      saveAttempt(resultData);
+      await saveAttempt(resultData);
     }
 
     setLoadingEvaluation(false);
@@ -154,23 +258,23 @@ export default function MLPracticeCard() {
         </p>
 
         <h2 className="mt-2 text-3xl font-bold text-white">
-          Topic-wise ML Question Practice
+          AI ML Question Practice
         </h2>
 
         <p className="mt-1 text-base text-slate-400">
-          Generate one AI question from your selected topic, write your answer,
-          and get semantic feedback like a real evaluator.
+          Leave the topic blank and AI will choose a Machine Learning topic
+          automatically. If you type a topic, AI will ask from that topic only.
         </p>
       </div>
 
       <div className="mb-5 grid gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Total Attempts</p>
+          <p className="text-sm text-slate-400">Total Local Attempts</p>
           <p className="mt-1 text-3xl font-bold text-white">{totalAttempts}</p>
         </div>
 
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Average Score</p>
+          <p className="text-sm text-slate-400">Local Average Score</p>
           <p className="mt-1 text-3xl font-bold text-white">
             {averageScore}/10
           </p>
@@ -178,25 +282,31 @@ export default function MLPracticeCard() {
 
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
           <p className="text-sm text-slate-400">Current Topic</p>
-          <p className="mt-1 text-xl font-bold text-white">{topic}</p>
+          <p className="mt-1 text-xl font-bold text-white">
+            {getTopicForDisplay()}
+          </p>
         </div>
       </div>
 
       <div className="mb-5 grid gap-4 md:grid-cols-3">
         <div>
-          <label className="mb-2 block text-sm text-slate-300">Topic</label>
+          <label className="mb-2 block text-sm text-slate-300">
+            Topic Optional
+          </label>
 
           <input
             value={topic}
             onChange={(event) => {
               setTopic(event.target.value);
-              setQuestion("");
-              setAnswer("");
-              setResult(null);
+              resetCurrentAttempt();
             }}
             className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white outline-none"
-            placeholder="Example: Linear Regression"
+            placeholder="Leave blank and AI will choose an ML topic automatically"
           />
+
+          <p className="mt-2 text-xs text-slate-500">
+            Example: Logistic Regression, KNN, Overfitting, Evaluation Metrics
+          </p>
         </div>
 
         <div>
@@ -208,9 +318,7 @@ export default function MLPracticeCard() {
             value={level}
             onChange={(event) => {
               setLevel(event.target.value);
-              setQuestion("");
-              setAnswer("");
-              setResult(null);
+              resetCurrentAttempt();
             }}
             className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white outline-none"
           >
@@ -226,14 +334,25 @@ export default function MLPracticeCard() {
             disabled={loadingQuestion}
             className="w-full rounded-xl bg-cyan-500 px-6 py-3 text-base font-semibold text-white transition hover:bg-cyan-600 disabled:opacity-60"
           >
-            {loadingQuestion ? "Generating..." : "Generate Question"}
+            {loadingQuestion ? "Generating..." : "Generate AI Question"}
           </button>
         </div>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5">
-          <h3 className="text-xl font-bold text-white">AI Question</h3>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-xl font-bold text-white">AI Question</h3>
+              <p className="mt-1 text-sm text-slate-400">
+                Topic: {activeTopic}
+              </p>
+            </div>
+
+            <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">
+              {level}
+            </span>
+          </div>
 
           <div className="mt-4 min-h-[240px] rounded-xl border border-slate-700 bg-slate-950/60 p-5">
             {question ? (
@@ -242,7 +361,8 @@ export default function MLPracticeCard() {
               </p>
             ) : (
               <p className="text-slate-400">
-                Select topic and difficulty, then click Generate Question.
+                You can leave the topic blank. Click Generate AI Question and
+                AI will ask a Machine Learning question automatically.
               </p>
             )}
           </div>
@@ -287,7 +407,9 @@ export default function MLPracticeCard() {
 
             <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
               <p className="text-sm text-slate-400">Topic</p>
-              <p className="mt-1 text-xl font-bold text-white">{topic}</p>
+              <p className="mt-1 text-xl font-bold text-white">
+                {activeTopic}
+              </p>
             </div>
           </div>
 
@@ -332,7 +454,8 @@ export default function MLPracticeCard() {
               Recent ML Practice History
             </h3>
             <p className="text-sm text-slate-400">
-              Your latest practice attempts are saved in this browser.
+              This section shows browser history for quick review. Open
+              Dashboard to view backend database records.
             </p>
           </div>
 
@@ -341,7 +464,7 @@ export default function MLPracticeCard() {
             disabled={history.length === 0}
             className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
           >
-            Clear History
+            Clear Local History
           </button>
         </div>
 
@@ -381,7 +504,9 @@ export default function MLPracticeCard() {
           </div>
         ) : (
           <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-6 text-center">
-            <p className="font-semibold text-white">No ML practice history yet</p>
+            <p className="font-semibold text-white">
+              No ML practice history yet
+            </p>
             <p className="mt-2 text-sm text-slate-400">
               Submit your first answer to start tracking.
             </p>

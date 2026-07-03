@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  apiFetchWithSessionRetry,
+  ensureConceptVivaSession,
+} from "@/utils/session";
 
 export default function ProjectChallengeCard() {
   const [domain, setDomain] = useState("Machine Learning");
-  const [topic, setTopic] = useState("Linear Regression");
+  const [topic, setTopic] = useState("");
   const [difficulty, setDifficulty] = useState("Beginner");
   const [challenge, setChallenge] = useState(null);
+  const [challengeId, setChallengeId] = useState("");
   const [submission, setSubmission] = useState("");
   const [review, setReview] = useState(null);
   const [loadingChallenge, setLoadingChallenge] = useState(false);
@@ -21,7 +26,51 @@ export default function ProjectChallengeCard() {
     }
   }, []);
 
-  function saveProjectAttempt(reviewData) {
+  function getTopicForRequest() {
+    const cleanTopic = topic.trim();
+
+    if (cleanTopic) {
+      return cleanTopic;
+    }
+
+    if (domain === "Machine Learning") {
+      return "AI should choose one useful Machine Learning project topic such as KNN, clustering, regression, classification, recommendation system, or model evaluation.";
+    }
+
+    if (domain === "Data Analytics") {
+      return "AI should choose one useful Data Analytics project topic such as sales dashboard, customer analysis, churn analysis, SQL analytics, or business KPI analysis.";
+    }
+
+    if (domain === "DSA") {
+      return "AI should choose one useful DSA project topic such as path finding visualizer, sorting visualizer, graph traversal, stack queue simulator, or algorithm analyzer.";
+    }
+
+    if (domain === "System Design") {
+      return "AI should choose one useful System Design topic such as URL shortener, Instagram news feed, notification system, rate limiter, chat system, or file storage system.";
+    }
+
+    return "AI selected project topic";
+  }
+
+  function getTopicForDisplay() {
+    const cleanTopic = topic.trim();
+
+    if (cleanTopic) {
+      return cleanTopic;
+    }
+
+    return "AI Selected Topic";
+  }
+
+  function getChallengeTopicForDisplay() {
+    return challenge?.topic || getTopicForDisplay();
+  }
+
+  function getChallengeTitle() {
+    return challenge?.project_title || "Project Challenge";
+  }
+
+  async function saveProjectAttempt(reviewData) {
     const now = new Date();
 
     const attempt = {
@@ -29,9 +78,10 @@ export default function ProjectChallengeCard() {
       date: now.toLocaleDateString(),
       time: now.toLocaleTimeString(),
       domain,
-      topic,
+      topic: getChallengeTopicForDisplay(),
       difficulty,
-      title: challenge?.project_title || "Project Challenge",
+      title: getChallengeTitle(),
+      challengeId: challengeId || "N/A",
       score: reviewData.score ?? 0,
       verdict: reviewData.verdict || "PARTIAL",
     };
@@ -43,6 +93,36 @@ export default function ProjectChallengeCard() {
       "conceptviva_project_history",
       JSON.stringify(updated)
     );
+
+    try {
+      const session = await ensureConceptVivaSession();
+
+      await apiFetchWithSessionRetry("/api/project", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "save",
+          session_id: session.sessionId,
+          challenge_id: challengeId,
+          domain,
+          topic: getChallengeTopicForDisplay(),
+          difficulty,
+          project_title: getChallengeTitle(),
+          challenge: challenge || {},
+          submission,
+          score: reviewData.score ?? 0,
+          verdict: reviewData.verdict || "PARTIAL",
+          feedback: reviewData.feedback || "",
+          missing_points: reviewData.missing_points || "",
+          improved_approach: reviewData.improved_approach || "",
+          next_steps: reviewData.next_steps || "",
+        }),
+      });
+    } catch (error) {
+      console.error("Project attempt backend save failed:", error);
+    }
   }
 
   function clearHistory() {
@@ -52,6 +132,7 @@ export default function ProjectChallengeCard() {
 
   function resetChallenge() {
     setChallenge(null);
+    setChallengeId("");
     setSubmission("");
     setReview(null);
   }
@@ -90,23 +171,37 @@ export default function ProjectChallengeCard() {
     setLoadingChallenge(true);
     resetChallenge();
 
+    const topicForRequest = getTopicForRequest();
+
     try {
-      const response = await fetch("/api/project", {
+      const response = await apiFetchWithSessionRetry("/api/project", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           action: "generate",
           domain,
-          topic,
+          topic: topicForRequest,
           difficulty,
         }),
       });
 
       const data = await response.json();
 
-      setChallenge(data.challenge || data);
+      const generatedChallenge = data.challenge || data;
+      const generatedChallengeId =
+        data.challenge_id || generatedChallenge.challenge_id || "";
+
+      setChallenge({
+        ...generatedChallenge,
+        challenge_id: generatedChallengeId,
+      });
+
+      setChallengeId(generatedChallengeId);
     } catch (error) {
       setChallenge({
-        project_title: `${topic} Project Challenge`,
+        project_title: `${getTopicForDisplay()} Project Challenge`,
         problem_statement:
           "Backend connection failed. Please check project API route and FastAPI backend.",
         dataset_columns: [],
@@ -115,6 +210,8 @@ export default function ProjectChallengeCard() {
         hints: [],
         submission_checklist: [],
       });
+
+      setChallengeId("");
     }
 
     setLoadingChallenge(false);
@@ -123,6 +220,13 @@ export default function ProjectChallengeCard() {
   async function evaluateSubmission() {
     if (!challenge) {
       alert("Please generate a project challenge first.");
+      return;
+    }
+
+    if (!challengeId) {
+      alert(
+        "Challenge ID missing. Please generate a fresh project challenge before submitting."
+      );
       return;
     }
 
@@ -135,14 +239,17 @@ export default function ProjectChallengeCard() {
     setReview(null);
 
     try {
-      const response = await fetch("/api/project", {
+      const response = await apiFetchWithSessionRetry("/api/project", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           action: "evaluate",
+          challenge_id: challengeId,
           domain,
-          topic,
+          topic: getChallengeTopicForDisplay(),
           difficulty,
-          challenge,
           submission,
         }),
       });
@@ -161,12 +268,13 @@ export default function ProjectChallengeCard() {
       };
 
       setReview(reviewData);
-      saveProjectAttempt(reviewData);
+      await saveProjectAttempt(reviewData);
     } catch (error) {
       const reviewData = {
         score: 0,
         verdict: "WEAK",
-        feedback: "Something went wrong while evaluating your project.",
+        feedback:
+          "Something went wrong while evaluating your project. Please check backend project endpoint and challenge_id verification.",
         missing_points: "Could not evaluate missing points.",
         improved_approach: "Check backend project endpoint.",
         next_steps: "Fix API route and try again.",
@@ -174,7 +282,6 @@ export default function ProjectChallengeCard() {
       };
 
       setReview(reviewData);
-      saveProjectAttempt(reviewData);
     }
 
     setLoadingReview(false);
@@ -202,19 +309,19 @@ export default function ProjectChallengeCard() {
         </h2>
 
         <p className="mt-1 text-base text-slate-400">
-          Choose a topic and let AI generate a project problem statement,
-          dataset schema, tasks, metrics, and final review.
+          Choose a domain and enter any topic. Leave topic blank and AI will
+          select a useful project topic automatically.
         </p>
       </div>
 
       <div className="mb-5 grid gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Total Project Attempts</p>
+          <p className="text-sm text-slate-400">Total Local Project Attempts</p>
           <p className="mt-1 text-3xl font-bold text-white">{totalProjects}</p>
         </div>
 
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Average Score</p>
+          <p className="text-sm text-slate-400">Local Average Score</p>
           <p className="mt-1 text-3xl font-bold text-white">
             {averageScore}/10
           </p>
@@ -222,7 +329,9 @@ export default function ProjectChallengeCard() {
 
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
           <p className="text-sm text-slate-400">Current Topic</p>
-          <p className="mt-1 text-xl font-bold text-white">{topic}</p>
+          <p className="mt-1 text-xl font-bold text-white">
+            {challenge ? getChallengeTopicForDisplay() : getTopicForDisplay()}
+          </p>
         </div>
       </div>
 
@@ -241,11 +350,14 @@ export default function ProjectChallengeCard() {
             <option>Machine Learning</option>
             <option>Data Analytics</option>
             <option>DSA</option>
+            <option>System Design</option>
           </select>
         </div>
 
         <div>
-          <label className="mb-2 block text-sm text-slate-300">Topic</label>
+          <label className="mb-2 block text-sm text-slate-300">
+            Topic Optional
+          </label>
 
           <input
             value={topic}
@@ -254,8 +366,12 @@ export default function ProjectChallengeCard() {
               resetChallenge();
             }}
             className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white outline-none"
-            placeholder="Example: Linear Regression"
+            placeholder="Example: KNN, Clustering, URL Shortener, Instagram News Feed"
           />
+
+          <p className="mt-2 text-xs text-slate-500">
+            Leave blank and AI will choose a project topic automatically.
+          </p>
         </div>
 
         <div>
@@ -291,12 +407,23 @@ export default function ProjectChallengeCard() {
           <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5">
             <div className="mb-4">
               <p className="text-sm font-semibold uppercase tracking-widest text-emerald-300">
-                Problem Statement
+                Verified Problem Statement
               </p>
 
               <h3 className="mt-2 text-2xl font-bold text-white">
-                {challenge.project_title || `${topic} Project Challenge`}
+                {getChallengeTitle()}
               </h3>
+
+              {challengeId ? (
+                <p className="mt-2 rounded-lg border border-emerald-400/30 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-200">
+                  Verified Challenge ID: {challengeId}
+                </p>
+              ) : (
+                <p className="mt-2 rounded-lg border border-red-400/30 bg-red-950/20 px-3 py-2 text-xs text-red-200">
+                  Challenge ID missing. Generate a fresh challenge before
+                  submitting.
+                </p>
+              )}
             </div>
 
             <div className="space-y-5">
@@ -306,7 +433,9 @@ export default function ProjectChallengeCard() {
               </section>
 
               <section className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
-                <p className="font-semibold text-white">Dataset / Table Schema</p>
+                <p className="font-semibold text-white">
+                  Dataset / Table Schema
+                </p>
                 {renderList(challenge.dataset_columns)}
               </section>
 
@@ -339,7 +468,7 @@ export default function ProjectChallengeCard() {
 
             <p className="mt-1 text-sm text-slate-400">
               Paste your approach, Python code, model steps, evaluation result,
-              or explanation here.
+              architecture design, API plan, schema, or explanation here.
             </p>
 
             <textarea
@@ -347,18 +476,18 @@ export default function ProjectChallengeCard() {
               onChange={(event) => setSubmission(event.target.value)}
               className="mt-4 min-h-[420px] w-full rounded-xl border border-slate-700 bg-slate-950/60 p-4 font-mono text-sm leading-7 text-white outline-none"
               placeholder={`Example:
-1. I will load the dataset.
-2. I will clean missing values.
-3. I will split train/test.
-4. I will train Linear Regression.
-5. I will evaluate using MAE, MSE, and R2 Score.
+1. I will define requirements.
+2. I will design APIs or model pipeline.
+3. I will design database schema or dataset flow.
+4. I will explain evaluation, scalability, and bottlenecks.
+5. I will mention trade-offs and next improvements.
 
-Paste your code or approach here...`}
+Paste your code, report, or design approach here...`}
             />
 
             <button
               onClick={evaluateSubmission}
-              disabled={loadingReview}
+              disabled={loadingReview || !challengeId}
               className="mt-4 rounded-xl bg-pink-500 px-6 py-3 text-base font-semibold text-white transition hover:bg-pink-600 disabled:opacity-60"
             >
               {loadingReview ? "Reviewing..." : "Submit for AI Review"}
@@ -417,7 +546,8 @@ Paste your code or approach here...`}
             No project challenge generated yet
           </p>
           <p className="mt-2 text-sm text-slate-400">
-            Select domain, topic, and level, then click Generate Challenge.
+            Select domain, optionally enter a topic, then click Generate
+            Challenge.
           </p>
         </div>
       )}
@@ -429,7 +559,8 @@ Paste your code or approach here...`}
               Recent Project Challenge History
             </h3>
             <p className="text-sm text-slate-400">
-              Your latest project reviews are saved in this browser.
+              This section shows browser history for quick review. Open
+              Dashboard to view backend database records.
             </p>
           </div>
 
@@ -438,7 +569,7 @@ Paste your code or approach here...`}
             disabled={history.length === 0}
             className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
           >
-            Clear History
+            Clear Local History
           </button>
         </div>
 
@@ -449,6 +580,7 @@ Paste your code or approach here...`}
                 <tr className="border-b border-slate-700">
                   <th className="py-3 pr-3">Date</th>
                   <th className="py-3 pr-3">Project</th>
+                  <th className="py-3 pr-3">Domain</th>
                   <th className="py-3 pr-3">Topic</th>
                   <th className="py-3 pr-3">Level</th>
                   <th className="py-3 pr-3">Score</th>
@@ -464,6 +596,9 @@ Paste your code or approach here...`}
                     </td>
                     <td className="py-3 pr-3 font-semibold text-white">
                       {item.title}
+                    </td>
+                    <td className="py-3 pr-3 text-slate-300">
+                      {item.domain}
                     </td>
                     <td className="py-3 pr-3 text-slate-300">{item.topic}</td>
                     <td className="py-3 pr-3 text-slate-300">
@@ -482,9 +617,7 @@ Paste your code or approach here...`}
           </div>
         ) : (
           <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-6 text-center">
-            <p className="font-semibold text-white">
-              No project history yet
-            </p>
+            <p className="font-semibold text-white">No project history yet</p>
             <p className="mt-2 text-sm text-slate-400">
               Submit your first project approach to start tracking.
             </p>

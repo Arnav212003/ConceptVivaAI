@@ -6,10 +6,32 @@ import tempfile
 import subprocess
 from dotenv import load_dotenv
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from google import genai
+from sqlalchemy.orm import Session
+
+from database import Base, engine, get_db
+import models
+
+from crud import (
+    create_dsa_attempt,
+    create_interview_report,
+    create_ml_practice_attempt,
+    create_project_attempt,
+    create_project_challenge,
+    decode_project_challenge,
+    get_dashboard_stats,
+    get_project_challenge_by_id,
+    get_user_history,
+)
+
+from security import (
+    create_session_credentials,
+    get_current_session_id,
+    revoke_session_token,
+)
 
 
 try:
@@ -53,23 +75,62 @@ except Exception:
 
 
 load_dotenv("../.env.local")
+load_dotenv(".env")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+ENABLE_CODE_EXECUTION = os.getenv("ENABLE_CODE_EXECUTION", "false").lower() == "true"
+
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 app = FastAPI(title="ConceptVivaAI Backend")
+
+Base.metadata.create_all(bind=engine)
 
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "http://127.0.0.1:3000",
         "http://192.168.29.17:3000",
+        FRONTEND_URL,
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.post("/session/start")
+def start_session():
+    return create_session_credentials()
+
+
+@app.post("/session/logout")
+def logout_session(
+    session_id: str = Depends(get_current_session_id),
+    x_session_token: str = Header(default="", alias="X-Session-Token"),
+    db: Session = Depends(get_db),
+):
+    if not x_session_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing session token.",
+        )
+
+    revoke_session_token(
+        db=db,
+        session_id=session_id,
+        session_token=x_session_token,
+        reason="User logout",
+    )
+
+    return {
+        "message": "Session logged out successfully.",
+        "session_id": session_id,
+        "revoked": True,
+    }
 
 
 class QuestionRequest(BaseModel):
@@ -112,6 +173,62 @@ class DSAOwnQuestionRequest(BaseModel):
     topic: str = "Arrays"
     difficulty: str = "Medium"
     pattern: str = "General DSA"
+
+
+class SaveMLPracticeAttemptRequest(BaseModel):
+    session_id: str = ""
+    topic: str
+    level: str
+    question: str
+    answer: str
+    score: float = 0
+    verdict: str = "PARTIAL"
+    feedback: str = ""
+    missing_points: str = ""
+    corrected_answer: str = ""
+    improvement: str = ""
+
+
+class SaveInterviewReportRequest(BaseModel):
+    session_id: str = ""
+    topic: str
+    level: str
+    rounds: int = 0
+    average_score: float = 0
+    strong_points: str = ""
+    weak_points: str = ""
+    recommendation: str = ""
+
+
+class SaveDSAAttemptRequest(BaseModel):
+    session_id: str = ""
+    mode: str = "Practice"
+    topic: str
+    difficulty: str
+    problem_name: str = "DSA Problem"
+    problem: str = ""
+    solution: str = ""
+    score: float = 0
+    status: str = "Needs Improvement"
+    feedback: str = ""
+
+
+class SaveProjectAttemptRequest(BaseModel):
+    session_id: str = ""
+    challenge_id: str = ""
+
+    domain: str = "Machine Learning"
+    topic: str = "AI Selected Topic"
+    difficulty: str = "Beginner"
+    project_title: str = "Project Challenge"
+    challenge: dict = Field(default_factory=dict)
+    submission: str = ""
+    score: float = 0
+    verdict: str = "PARTIAL"
+    feedback: str = ""
+    missing_points: str = ""
+    improved_approach: str = ""
+    next_steps: str = ""
 
 
 def extract_json(text):
@@ -181,6 +298,89 @@ def get_difficulty_distribution(questions):
         "medium": medium,
         "hard": hard,
         "total": len(questions),
+    }
+
+
+def format_datetime(value):
+    if not value:
+        return ""
+
+    try:
+        return value.isoformat()
+    except Exception:
+        return str(value)
+
+
+def serialize_ml_attempt(item):
+    return {
+        "id": item.id,
+        "session_id": item.session_id,
+        "topic": item.topic,
+        "level": item.level,
+        "question": item.question,
+        "answer": item.answer,
+        "score": item.score,
+        "verdict": item.verdict,
+        "feedback": item.feedback,
+        "missing_points": item.missing_points,
+        "corrected_answer": item.corrected_answer,
+        "improvement": item.improvement,
+        "created_at": format_datetime(item.created_at),
+    }
+
+
+def serialize_interview_report(item):
+    return {
+        "id": item.id,
+        "session_id": item.session_id,
+        "topic": item.topic,
+        "level": item.level,
+        "rounds": item.rounds,
+        "average_score": item.average_score,
+        "strong_points": item.strong_points,
+        "weak_points": item.weak_points,
+        "recommendation": item.recommendation,
+        "created_at": format_datetime(item.created_at),
+    }
+
+
+def serialize_dsa_attempt(item):
+    return {
+        "id": item.id,
+        "session_id": item.session_id,
+        "mode": item.mode,
+        "topic": item.topic,
+        "difficulty": item.difficulty,
+        "problem_name": item.problem_name,
+        "problem": item.problem,
+        "solution": item.solution,
+        "score": item.score,
+        "status": item.status,
+        "feedback": item.feedback,
+        "created_at": format_datetime(item.created_at),
+    }
+
+
+def serialize_project_attempt(item):
+    challenge_data = decode_project_challenge(item.challenge_json)
+
+    return {
+        "id": item.id,
+        "session_id": item.session_id,
+        "domain": item.domain,
+        "topic": item.topic,
+        "difficulty": item.difficulty,
+        "project_title": item.project_title,
+        "challenge": challenge_data,
+        "challenge_json": challenge_data,
+        "submission": item.submission,
+        "score": item.score,
+        "verdict": item.verdict,
+        "feedback": item.feedback,
+        "missing_points": item.missing_points,
+        "improved_approach": item.improved_approach,
+        "next_steps": item.next_steps,
+        "created_at": format_datetime(item.created_at),
     }
 
 
@@ -802,6 +1002,20 @@ def get_test_cases(topic):
 
 
 def run_python_tests(topic, solution):
+    if not ENABLE_CODE_EXECUTION:
+        return {
+            "supported": False,
+            "all_passed": False,
+            "test_cases": [
+                {
+                    "input": "Production security mode",
+                    "expected_output": "Code execution disabled",
+                    "actual_output": "Direct user-code execution is disabled for safety. AI review is used instead.",
+                    "status": "Not Executed",
+                }
+            ],
+        }
+
     topic_key = get_topic_key(topic)
 
     supported_topics = [
@@ -1532,15 +1746,12 @@ Return only valid JSON in this exact format:
 
 class ProjectChallengeRequest(BaseModel):
     domain: str = "Machine Learning"
-    topic: str = "Linear Regression"
+    topic: str = "AI Selected Topic"
     difficulty: str = "Beginner"
 
 
 class ProjectSubmissionRequest(BaseModel):
-    domain: str = "Machine Learning"
-    topic: str = "Linear Regression"
-    difficulty: str = "Beginner"
-    challenge: dict
+    challenge_id: str
     submission: str
 
 
@@ -1799,28 +2010,253 @@ Scoring guide:
 
 
 @app.post("/generate-project-challenge")
-def generate_project_challenge(request: ProjectChallengeRequest):
+def generate_project_challenge(
+    request: ProjectChallengeRequest,
+    session_id: str = Depends(get_current_session_id),
+    db: Session = Depends(get_db)
+):
     challenge = generate_project_challenge_with_gemini(
         domain=request.domain,
         topic=request.topic,
         difficulty=request.difficulty
     )
 
+    stored_challenge = create_project_challenge(
+        db,
+        {
+            "session_id": session_id,
+            "domain": request.domain,
+            "topic": request.topic,
+            "difficulty": request.difficulty,
+            "project_title": challenge.get("project_title", "Project Challenge"),
+            "challenge": challenge,
+        }
+    )
+
     return {
         "mode": "project_challenge",
+        "challenge_id": stored_challenge.challenge_id,
         "challenge": challenge,
-        "message": "Project challenge generated successfully.",
+        "message": "Project challenge generated and stored successfully.",
     }
 
 
 @app.post("/evaluate-project-submission")
-def evaluate_project_submission(request: ProjectSubmissionRequest):
+def evaluate_project_submission(
+    request: ProjectSubmissionRequest,
+    session_id: str = Depends(get_current_session_id),
+    db: Session = Depends(get_db)
+):
+    stored_challenge = get_project_challenge_by_id(
+        db,
+        session_id=session_id,
+        challenge_id=request.challenge_id
+    )
+
+    if not stored_challenge:
+        raise HTTPException(
+            status_code=404,
+            detail="Project challenge not found for this session."
+        )
+
+    challenge = decode_project_challenge(stored_challenge.challenge_json)
+
     review = evaluate_project_submission_with_gemini(
-        domain=request.domain,
-        topic=request.topic,
-        difficulty=request.difficulty,
-        challenge=request.challenge,
+        domain=stored_challenge.domain,
+        topic=stored_challenge.topic,
+        difficulty=stored_challenge.difficulty,
+        challenge=challenge,
         submission=request.submission
     )
 
-    return review
+    return {
+        **review,
+        "challenge_id": stored_challenge.challenge_id,
+        "verified_challenge": True,
+    }
+
+
+@app.post("/save-ml-practice-attempt")
+def save_ml_practice_attempt(
+    request: SaveMLPracticeAttemptRequest,
+    session_id: str = Depends(get_current_session_id),
+    db: Session = Depends(get_db)
+):
+    attempt = create_ml_practice_attempt(
+        db,
+        {
+            "session_id": session_id,
+            "topic": request.topic,
+            "level": request.level,
+            "question": request.question,
+            "answer": request.answer,
+            "score": request.score,
+            "verdict": request.verdict,
+            "feedback": request.feedback,
+            "missing_points": request.missing_points,
+            "corrected_answer": request.corrected_answer,
+            "improvement": request.improvement,
+        }
+    )
+
+    return {
+        "message": "ML practice attempt saved successfully.",
+        "attempt": serialize_ml_attempt(attempt),
+    }
+
+
+@app.post("/save-interview-report")
+def save_interview_report(
+    request: SaveInterviewReportRequest,
+    session_id: str = Depends(get_current_session_id),
+    db: Session = Depends(get_db)
+):
+    report = create_interview_report(
+        db,
+        {
+            "session_id": session_id,
+            "topic": request.topic,
+            "level": request.level,
+            "rounds": request.rounds,
+            "average_score": request.average_score,
+            "strong_points": request.strong_points,
+            "weak_points": request.weak_points,
+            "recommendation": request.recommendation,
+        }
+    )
+
+    return {
+        "message": "Interview report saved successfully.",
+        "report": serialize_interview_report(report),
+    }
+
+
+@app.post("/save-dsa-attempt")
+def save_dsa_attempt(
+    request: SaveDSAAttemptRequest,
+    session_id: str = Depends(get_current_session_id),
+    db: Session = Depends(get_db)
+):
+    attempt = create_dsa_attempt(
+        db,
+        {
+            "session_id": session_id,
+            "mode": request.mode,
+            "topic": request.topic,
+            "difficulty": request.difficulty,
+            "problem_name": request.problem_name,
+            "problem": request.problem,
+            "solution": request.solution,
+            "score": request.score,
+            "status": request.status,
+            "feedback": request.feedback,
+        }
+    )
+
+    return {
+        "message": "DSA attempt saved successfully.",
+        "attempt": serialize_dsa_attempt(attempt),
+    }
+
+
+@app.post("/save-project-attempt")
+def save_project_attempt(
+    request: SaveProjectAttemptRequest,
+    session_id: str = Depends(get_current_session_id),
+    db: Session = Depends(get_db)
+):
+    challenge = request.challenge
+    domain = request.domain
+    topic = request.topic
+    difficulty = request.difficulty
+    project_title = request.project_title
+
+    if request.challenge_id:
+        stored_challenge = get_project_challenge_by_id(
+            db,
+            session_id=session_id,
+            challenge_id=request.challenge_id
+        )
+
+        if not stored_challenge:
+            raise HTTPException(
+                status_code=404,
+                detail="Project challenge not found for this session."
+            )
+
+        challenge = decode_project_challenge(stored_challenge.challenge_json)
+        domain = stored_challenge.domain
+        topic = stored_challenge.topic
+        difficulty = stored_challenge.difficulty
+        project_title = stored_challenge.project_title
+
+    attempt = create_project_attempt(
+        db,
+        {
+            "session_id": session_id,
+            "challenge_id": request.challenge_id,
+            "domain": domain,
+            "topic": topic,
+            "difficulty": difficulty,
+            "project_title": project_title,
+            "challenge": challenge,
+            "submission": request.submission,
+            "score": request.score,
+            "verdict": request.verdict,
+            "feedback": request.feedback,
+            "missing_points": request.missing_points,
+            "improved_approach": request.improved_approach,
+            "next_steps": request.next_steps,
+        }
+    )
+
+    return {
+        "message": "Project attempt saved successfully.",
+        "verified_challenge": bool(request.challenge_id),
+        "attempt": serialize_project_attempt(attempt),
+    }
+
+
+@app.get("/dashboard-stats")
+def dashboard_stats(
+    session_id: str = Depends(get_current_session_id),
+    db: Session = Depends(get_db)
+):
+    return get_dashboard_stats(db, session_id)
+
+
+@app.get("/history")
+def history(
+    limit: int = 20,
+    offset: int = 0,
+    session_id: str = Depends(get_current_session_id),
+    db: Session = Depends(get_db)
+):
+    history_data = get_user_history(db, session_id, limit=limit, offset=offset)
+
+    return {
+        "session_id": session_id,
+        "pagination": history_data.get(
+            "pagination",
+            {
+                "limit": limit,
+                "offset": offset,
+            }
+        ),
+        "ml_practice": [
+            serialize_ml_attempt(item)
+            for item in history_data["ml_practice"]
+        ],
+        "dsa_practice": [
+            serialize_dsa_attempt(item)
+            for item in history_data["dsa_practice"]
+        ],
+        "project_challenge": [
+            serialize_project_attempt(item)
+            for item in history_data["project_challenge"]
+        ],
+        "voice_interview": [
+            serialize_interview_report(item)
+            for item in history_data["voice_interview"]
+        ],
+    }

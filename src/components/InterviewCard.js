@@ -2,9 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import ResultCard from "./ResultCard";
+import {
+  apiFetchWithSessionRetry,
+  ensureConceptVivaSession,
+} from "@/utils/session";
 
 export default function InterviewCard() {
-  const [topic, setTopic] = useState("Linear Regression");
+  const [topic, setTopic] = useState("");
+  const [activeTopic, setActiveTopic] = useState("AI Selected Topic");
   const [level, setLevel] = useState("Easy");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
@@ -23,7 +28,6 @@ export default function InterviewCard() {
   const keepListeningRef = useRef(false);
   const transcriptRef = useRef("");
   const maxRounds = 5;
-  
 
   useEffect(() => {
     const savedHistory = localStorage.getItem("conceptviva_interview_history");
@@ -32,6 +36,52 @@ export default function InterviewCard() {
       setInterviewHistory(JSON.parse(savedHistory));
     }
   }, []);
+
+  function getTopicForDisplay() {
+    const cleanTopic = topic.trim();
+
+    if (cleanTopic) {
+      return cleanTopic;
+    }
+
+    return "AI Selected Topic";
+  }
+
+  function getTopicForRequest() {
+    const cleanTopic = topic.trim();
+
+    if (cleanTopic) {
+      return cleanTopic;
+    }
+
+    return `
+AI mock interview practice.
+
+The user did not select a fixed topic.
+Choose one useful interview topic yourself from:
+- Machine Learning basics
+- Linear Regression
+- Logistic Regression
+- KNN
+- Clustering
+- Overfitting and Underfitting
+- Bias Variance Tradeoff
+- Model Evaluation Metrics
+- DSA Arrays
+- DSA Strings
+- Binary Search
+- Graphs
+- System Design basics
+- URL Shortener
+- Rate Limiter
+- Caching
+- Load Balancing
+- Database Design
+
+Ask only one clear interview question.
+Do not reveal the answer.
+`;
+  }
 
   function getSpeechRecognition() {
     if (typeof window === "undefined") return null;
@@ -78,98 +128,98 @@ export default function InterviewCard() {
   }
 
   function startListening() {
-  const recognition = getSpeechRecognition();
+    const recognition = getSpeechRecognition();
 
-  if (!recognition) {
-    alert("Speech recognition is not supported in this browser. Use Chrome or Edge.");
-    return;
-  }
+    if (!recognition) {
+      alert("Speech recognition is not supported in this browser. Use Chrome or Edge.");
+      return;
+    }
 
-  stopSpeaking();
+    stopSpeaking();
 
-  if (recognitionRef.current) {
-    try {
-      recognitionRef.current.stop();
-    } catch (error) {}
-  }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (error) {}
+    }
 
-  keepListeningRef.current = true;
-  transcriptRef.current = answer ? `${answer.trim()} ` : "";
+    keepListeningRef.current = true;
+    transcriptRef.current = answer ? `${answer.trim()} ` : "";
 
-  recognitionRef.current = recognition;
+    recognitionRef.current = recognition;
 
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.lang = "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
 
-  recognition.onstart = () => {
-    setIsListening(true);
-  };
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
 
-  recognition.onresult = (event) => {
-    let finalText = "";
-    let interimText = "";
+    recognition.onresult = (event) => {
+      let finalText = "";
+      let interimText = "";
 
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const spokenText = event.results[i][0].transcript;
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const spokenText = event.results[i][0].transcript;
 
-      if (event.results[i].isFinal) {
-        finalText += `${spokenText} `;
-      } else {
-        interimText += spokenText;
+        if (event.results[i].isFinal) {
+          finalText += `${spokenText} `;
+        } else {
+          interimText += spokenText;
+        }
       }
+
+      if (finalText.trim()) {
+        transcriptRef.current += finalText;
+      }
+
+      setAnswer((transcriptRef.current + interimText).trim());
+    };
+
+    recognition.onerror = (event) => {
+      console.log("Speech recognition error:", event.error);
+
+      if (
+        event.error === "not-allowed" ||
+        event.error === "service-not-allowed"
+      ) {
+        keepListeningRef.current = false;
+        setIsListening(false);
+        alert("Microphone permission is blocked. Please allow microphone permission.");
+      }
+    };
+
+    recognition.onend = () => {
+      if (keepListeningRef.current) {
+        setTimeout(() => {
+          try {
+            recognition.start();
+          } catch (error) {}
+        }, 300);
+      } else {
+        setIsListening(false);
+      }
+    };
+
+    try {
+      recognition.start();
+    } catch (error) {
+      console.log("Mic start error:", error);
     }
-
-    if (finalText.trim()) {
-      transcriptRef.current += finalText;
-    }
-
-    setAnswer((transcriptRef.current + interimText).trim());
-  };
-
-  recognition.onerror = (event) => {
-    console.log("Speech recognition error:", event.error);
-
-    if (
-      event.error === "not-allowed" ||
-      event.error === "service-not-allowed"
-    ) {
-      keepListeningRef.current = false;
-      setIsListening(false);
-      alert("Microphone permission is blocked. Please allow microphone permission.");
-    }
-  };
-
-  recognition.onend = () => {
-    if (keepListeningRef.current) {
-      setTimeout(() => {
-        try {
-          recognition.start();
-        } catch (error) {}
-      }, 300);
-    } else {
-      setIsListening(false);
-    }
-  };
-
-  try {
-    recognition.start();
-  } catch (error) {
-    console.log("Mic start error:", error);
   }
-}
 
   function stopListening() {
-  keepListeningRef.current = false;
+    keepListeningRef.current = false;
 
-  if (recognitionRef.current) {
-    try {
-      recognitionRef.current.stop();
-    } catch (error) {}
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (error) {}
+    }
+
+    setIsListening(false);
   }
-
-  setIsListening(false);
-}
 
   function resetInterview() {
     stopSpeaking();
@@ -182,6 +232,7 @@ export default function InterviewCard() {
     setInterviewScores([]);
     setFinalReport(null);
     setAutoMode(false);
+    setActiveTopic(getTopicForDisplay());
   }
 
   function getAverageScore(scores) {
@@ -227,15 +278,16 @@ export default function InterviewCard() {
     return "Revise definitions, working, examples, advantages, limitations, and common interview questions.";
   }
 
-  function saveInterviewReport(scores) {
+  async function saveInterviewReport(scores) {
     const avgScore = getAverageScore(scores);
     const today = new Date();
+    const reportTopic = activeTopic || getTopicForDisplay();
 
     const report = {
       id: Date.now(),
       date: today.toLocaleDateString(),
       time: today.toLocaleTimeString(),
-      topic,
+      topic: reportTopic,
       level,
       rounds: scores.length,
       averageScore: avgScore,
@@ -252,6 +304,30 @@ export default function InterviewCard() {
       "conceptviva_interview_history",
       JSON.stringify(updatedHistory)
     );
+
+    try {
+      const session = await ensureConceptVivaSession();
+
+      await apiFetchWithSessionRetry("/api/interview", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "saveInterviewReport",
+          session_id: session.sessionId,
+          topic: reportTopic,
+          level,
+          rounds: scores.length,
+          average_score: avgScore,
+          strong_points: report.strongPoints,
+          weak_points: report.weakPoints,
+          recommendation: report.recommendation,
+        }),
+      });
+    } catch (error) {
+      console.error("Interview report backend save failed:", error);
+    }
   }
 
   function clearInterviewHistory() {
@@ -279,11 +355,19 @@ export default function InterviewCard() {
         return;
       }
 
-      const response = await fetch("/api/interview", {
+      const topicForRequest = getTopicForRequest();
+      const topicForDisplay = getTopicForDisplay();
+
+      setActiveTopic(topicForDisplay);
+
+      const response = await apiFetchWithSessionRetry("/api/interview", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           action: "question",
-          topic,
+          topic: topicForRequest,
           level,
         }),
       });
@@ -291,7 +375,8 @@ export default function InterviewCard() {
       const data = await response.json();
 
       const generatedQuestion =
-        data.question || `Can you explain ${topic} clearly?`;
+        data.question ||
+        `Can you explain ${topicForDisplay} clearly with an example?`;
 
       setQuestion(generatedQuestion);
       setRound((prev) => prev + 1);
@@ -302,7 +387,9 @@ export default function InterviewCard() {
         }
       });
     } catch (error) {
-      const fallbackQuestion = `Can you explain the basic concept of ${topic}?`;
+      const fallbackTopic = getTopicForDisplay();
+      const fallbackQuestion = `Can you explain the basic concept of ${fallbackTopic}?`;
+
       setQuestion(fallbackQuestion);
       setRound((prev) => prev + 1);
 
@@ -329,12 +416,18 @@ export default function InterviewCard() {
 
     setLoadingEvaluation(true);
 
+    const topicForEvaluation =
+      activeTopic === "AI Selected Topic" ? getTopicForRequest() : activeTopic;
+
     try {
-      const response = await fetch("/api/interview", {
+      const response = await apiFetchWithSessionRetry("/api/interview", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           action: "evaluate",
-          topic,
+          topic: topicForEvaluation,
           level,
           question,
           answer,
@@ -349,7 +442,7 @@ export default function InterviewCard() {
         improvement: data.improvement || "Improve answer structure.",
         follow_up_question:
           data.follow_up_question ||
-          `Can you explain one practical use case of ${topic}?`,
+          `Can you explain one practical use case of ${activeTopic}?`,
       };
 
       setResult(evaluation);
@@ -383,7 +476,7 @@ export default function InterviewCard() {
         score: 5,
         feedback: "Something went wrong while evaluating your answer.",
         improvement: "Check backend and API route connection.",
-        follow_up_question: `Can you explain ${topic} with an example?`,
+        follow_up_question: `Can you explain ${activeTopic} with an example?`,
       };
 
       setResult(evaluation);
@@ -486,14 +579,14 @@ export default function InterviewCard() {
 
       <div className="mb-5 grid gap-4 md:grid-cols-4">
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Total Interviews</p>
+          <p className="text-sm text-slate-400">Total Local Interviews</p>
           <p className="mt-1 text-3xl font-bold text-white">
             {totalInterviews}
           </p>
         </div>
 
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Avg Interview Score</p>
+          <p className="text-sm text-slate-400">Local Avg Interview Score</p>
           <p className="mt-1 text-3xl font-bold text-white">
             {averageInterviewScore}/10
           </p>
@@ -507,7 +600,7 @@ export default function InterviewCard() {
         </div>
 
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Last Topic</p>
+          <p className="text-sm text-slate-400">Last Local Topic</p>
           <p className="mt-1 text-xl font-bold text-white">
             {lastInterviewTopic}
           </p>
@@ -517,15 +610,22 @@ export default function InterviewCard() {
       <div className="mb-5 grid gap-4 md:grid-cols-2">
         <div>
           <label className="mb-2 block text-sm text-slate-300">
-            Interview Topic
+            Interview Topic Optional
           </label>
 
           <input
             value={topic}
-            onChange={(e) => setTopic(e.target.value)}
+            onChange={(e) => {
+              setTopic(e.target.value);
+              setActiveTopic(e.target.value.trim() || "AI Selected Topic");
+            }}
             className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white outline-none"
-            placeholder="Example: Linear Regression"
+            placeholder="Example: KNN, Clustering, Arrays, URL Shortener"
           />
+
+          <p className="mt-2 text-xs text-slate-500">
+            Leave blank and AI will choose an interview topic automatically.
+          </p>
         </div>
 
         <div>
@@ -714,7 +814,8 @@ export default function InterviewCard() {
               Recent Interview History
             </h3>
             <p className="text-sm text-slate-400">
-              Your latest interview reports are saved in this browser.
+              This section shows browser history for quick review. Open
+              Dashboard to view backend database records.
             </p>
           </div>
 
@@ -723,7 +824,7 @@ export default function InterviewCard() {
             disabled={interviewHistory.length === 0}
             className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
           >
-            Clear History
+            Clear Local History
           </button>
         </div>
 

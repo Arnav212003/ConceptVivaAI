@@ -3,75 +3,62 @@ const PYTHON_BACKEND_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   "http://127.0.0.1:8000";
 
+function getSessionHeaders(request) {
+  const sessionId = request.headers.get("X-Session-Id");
+  const sessionToken = request.headers.get("X-Session-Token");
+
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  if (sessionId) {
+    headers["X-Session-Id"] = sessionId;
+  }
+
+  if (sessionToken) {
+    headers["X-Session-Token"] = sessionToken;
+  }
+
+  return headers;
+}
+
 export async function POST(request) {
   try {
     const body = await request.json();
 
-    const {
-      action,
-      domain,
-      topic,
-      difficulty,
-      challenge,
-      submission,
-    } = body;
+    let endpoint = "/generate-project-challenge";
 
-    if (action === "generate") {
-      const response = await fetch(
-        `${PYTHON_BACKEND_URL}/generate-project-challenge`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            domain,
-            topic,
-            difficulty,
-          }),
-        }
-      );
-
-      const data = await response.json();
-
-      return Response.json(data);
+    if (body.action === "generate") {
+      endpoint = "/generate-project-challenge";
     }
 
-    if (action === "evaluate") {
-      const response = await fetch(
-        `${PYTHON_BACKEND_URL}/evaluate-project-submission`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            domain,
-            topic,
-            difficulty,
-            challenge,
-            submission,
-          }),
-        }
-      );
-
-      const data = await response.json();
-
-      return Response.json(data);
+    if (body.action === "evaluate") {
+      endpoint = "/evaluate-project-submission";
     }
 
-    return Response.json(
-      {
-        error: "Invalid project action",
-      },
-      {
-        status: 400,
-      }
-    );
+    if (body.action === "save") {
+      endpoint = "/save-project-attempt";
+    }
+
+    const payload = { ...body };
+    delete payload.action;
+
+    const response = await fetch(`${PYTHON_BACKEND_URL}${endpoint}`, {
+      method: "POST",
+      headers: getSessionHeaders(request),
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    });
+
+    const data = await response.json();
+
+    return Response.json(data, {
+      status: response.status,
+    });
   } catch (error) {
     return Response.json(
       {
-        error: "Next.js project API failed while connecting to Python backend.",
+        error: "Project API request failed.",
         details: error.message,
       },
       {

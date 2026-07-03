@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Editor from "@monaco-editor/react";
+import {
+  apiFetchWithSessionRetry,
+  ensureConceptVivaSession,
+} from "@/utils/session";
 
 export default function DSAPracticeCard() {
   const [mode, setMode] = useState("practice");
@@ -17,6 +21,14 @@ export default function DSAPracticeCard() {
   const [mockQuestions, setMockQuestions] = useState([]);
   const [selectedMockQuestion, setSelectedMockQuestion] = useState(null);
 
+  const limitedExecutionTopics = [
+    "Linked List",
+    "Queue",
+    "Trees",
+    "Graphs",
+    "Dynamic Programming",
+  ];
+
   useEffect(() => {
     const savedHistory = localStorage.getItem("conceptviva_dsa_history");
 
@@ -24,6 +36,10 @@ export default function DSAPracticeCard() {
       setDsaHistory(JSON.parse(savedHistory));
     }
   }, []);
+
+  function isLimitedExecutionTopic() {
+    return limitedExecutionTopics.includes(topic);
+  }
 
   function getDefaultStarterCode() {
     return `class Solution:
@@ -49,7 +65,7 @@ export default function DSAPracticeCard() {
       .trim();
   }
 
-  function saveDsaAttempt(resultData) {
+  async function saveDsaAttempt(resultData) {
     const today = new Date();
 
     const attempt = {
@@ -72,6 +88,35 @@ export default function DSAPracticeCard() {
       "conceptviva_dsa_history",
       JSON.stringify(updatedHistory)
     );
+
+    try {
+      const session = await ensureConceptVivaSession();
+
+      await apiFetchWithSessionRetry("/api/dsa", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "save",
+          session_id: session.sessionId,
+          mode: mode === "practice" ? "Practice" : "Mock Interview",
+          topic,
+          difficulty,
+          problem_name: getProblemName(problem),
+          problem,
+          solution,
+          score: resultData.score ?? 0,
+          status:
+            Number(resultData.score ?? 0) >= 7
+              ? "Good"
+              : "Needs Improvement",
+          feedback: resultData.feedback || "",
+        }),
+      });
+    } catch (error) {
+      console.error("DSA attempt backend save failed:", error);
+    }
   }
 
   function clearDsaHistory() {
@@ -116,8 +161,11 @@ export default function DSAPracticeCard() {
     resetWorkspace();
 
     try {
-      const response = await fetch("/api/dsa", {
+      const response = await apiFetchWithSessionRetry("/api/dsa", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           action: "generate",
           topic,
@@ -148,8 +196,11 @@ export default function DSAPracticeCard() {
     setMockQuestions([]);
 
     try {
-      const response = await fetch("/api/dsa", {
+      const response = await apiFetchWithSessionRetry("/api/dsa", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           action: "generateMockSet",
           topic,
@@ -183,13 +234,17 @@ export default function DSAPracticeCard() {
     setActiveTab("code");
 
     try {
-      const response = await fetch("/api/dsa", {
+      const response = await apiFetchWithSessionRetry("/api/dsa", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           action: "generateFromQuestion",
-          question,
+          title: question.title || "DSA Problem",
           topic: question.topic || topic,
           difficulty: question.difficulty || difficulty,
+          pattern: question.pattern || "General DSA",
         }),
       });
 
@@ -223,8 +278,11 @@ export default function DSAPracticeCard() {
     setFeedback(null);
 
     try {
-      const response = await fetch("/api/dsa", {
+      const response = await apiFetchWithSessionRetry("/api/dsa", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           action: "evaluate",
           topic,
@@ -249,7 +307,7 @@ export default function DSAPracticeCard() {
       };
 
       setFeedback(resultData);
-      saveDsaAttempt(resultData);
+      await saveDsaAttempt(resultData);
       setActiveTab("result");
     } catch (error) {
       const resultData = {
@@ -265,7 +323,7 @@ export default function DSAPracticeCard() {
       };
 
       setFeedback(resultData);
-      saveDsaAttempt(resultData);
+      await saveDsaAttempt(resultData);
       setActiveTab("result");
     }
 
@@ -360,12 +418,12 @@ export default function DSAPracticeCard() {
 
       <div className="mb-5 grid gap-4 md:grid-cols-4">
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Total Attempts</p>
+          <p className="text-sm text-slate-400">Total Local Attempts</p>
           <p className="mt-1 text-3xl font-bold text-white">{totalAttempts}</p>
         </div>
 
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Average Score</p>
+          <p className="text-sm text-slate-400">Local Average Score</p>
           <p className="mt-1 text-3xl font-bold text-white">
             {averageScore}/10
           </p>
@@ -377,10 +435,23 @@ export default function DSAPracticeCard() {
         </div>
 
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Last Topic</p>
+          <p className="text-sm text-slate-400">Last Local Topic</p>
           <p className="mt-1 text-xl font-bold text-white">{lastTopic}</p>
         </div>
       </div>
+
+      {isLimitedExecutionTopic() && (
+        <div className="mb-5 rounded-2xl border border-yellow-400/30 bg-yellow-950/20 p-4">
+          <p className="font-semibold text-yellow-300">
+            Evaluation note for {topic}
+          </p>
+          <p className="mt-2 text-sm leading-7 text-slate-200">
+            This topic can involve complex structures. Current evaluation is
+            AI-assisted and focuses on logic, approach, complexity, and
+            explanation. Open Dashboard to view backend-saved attempts.
+          </p>
+        </div>
+      )}
 
       <div className="mb-5 rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
         <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-pink-300">
@@ -687,7 +758,9 @@ export default function DSAPracticeCard() {
                 </button>
 
                 <button
-                  onClick={() => setSolution(problem ? getDefaultStarterCode() : "")}
+                  onClick={() =>
+                    setSolution(problem ? getDefaultStarterCode() : "")
+                  }
                   disabled={!problem}
                   className="rounded-xl bg-slate-700 px-6 py-3 text-base font-semibold text-white transition hover:bg-slate-600 disabled:opacity-60"
                 >
@@ -841,7 +914,8 @@ export default function DSAPracticeCard() {
               Recent DSA Practice History
             </h3>
             <p className="text-sm text-slate-400">
-              Your latest attempts are saved in this browser.
+              This section shows browser history for quick review. Open
+              Dashboard to view backend database records.
             </p>
           </div>
 
@@ -850,7 +924,7 @@ export default function DSAPracticeCard() {
             disabled={dsaHistory.length === 0}
             className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
           >
-            Clear History
+            Clear Local History
           </button>
         </div>
 
