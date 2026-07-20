@@ -2,6 +2,12 @@ const SESSION_ID_KEY = "conceptviva_session_id";
 const SESSION_TOKEN_KEY = "conceptviva_session_token";
 const SESSION_EXPIRES_AT_KEY = "conceptviva_session_expires_at";
 
+// if multiple components call ensureConceptVivaSession() at the same time
+// (e.g. the dashboard firing two fetches in parallel), we don't want each
+// one to independently create a brand new session. This holds the
+// in-flight session-creation promise so everyone waits on the same one.
+let pendingSessionPromise = null;
+
 function getCurrentTimeMs() {
   return Date.now();
 }
@@ -96,9 +102,23 @@ async function createNewSession() {
   };
 }
 
+// wraps createNewSession so that parallel callers share one request
+// instead of each firing off their own "/api/session" call
+async function createNewSessionShared() {
+  if (pendingSessionPromise) {
+    return pendingSessionPromise;
+  }
+
+  pendingSessionPromise = createNewSession().finally(() => {
+    pendingSessionPromise = null;
+  });
+
+  return pendingSessionPromise;
+}
+
 export async function forceNewConceptVivaSession() {
   clearSession();
-  return createNewSession();
+  return createNewSessionShared();
 }
 
 export async function ensureConceptVivaSession() {
@@ -116,7 +136,7 @@ export async function ensureConceptVivaSession() {
   }
 
   clearSession();
-  return createNewSession();
+  return createNewSessionShared();
 }
 
 export async function getSessionHeaders() {

@@ -16,6 +16,8 @@ __pycache__/
 .DS_Store
 .vscode/
 
+.pytest_cache/
+
 # Local SQLite database
 *.db
 backend/*.db

@@ -37,6 +37,24 @@ export default function InterviewCard() {
     }
   }, []);
 
+  // stop the mic and any ongoing speech if the user navigates away mid-interview,
+  // otherwise recognition/synthesis can keep running in the background
+  useEffect(() => {
+    return () => {
+      keepListeningRef.current = false;
+
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (error) {}
+      }
+
+      if (typeof window !== "undefined") {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
   function getTopicForDisplay() {
     const cleanTopic = topic.trim();
 

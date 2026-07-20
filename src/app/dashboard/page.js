@@ -3,6 +3,159 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetchWithSessionRetry } from "@/utils/session";
 
+function formatDate(value) {
+  if (!value) return "N/A";
+
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
+}
+
+function getReadinessLabel(value) {
+  if (value >= 80) return "Interview Ready";
+  if (value >= 60) return "Good Progress";
+  if (value >= 40) return "Needs Practice";
+  if (value > 0) return "Revision Needed";
+  return "No Data Yet";
+}
+
+function getScoreTone(value) {
+  if (value >= 8) {
+    return {
+      text: "text-emerald-300",
+      bg: "bg-emerald-500",
+      border: "border-emerald-400/30",
+      softBg: "bg-emerald-950/20",
+    };
+  }
+
+  if (value >= 6) {
+    return {
+      text: "text-yellow-300",
+      bg: "bg-yellow-500",
+      border: "border-yellow-400/30",
+      softBg: "bg-yellow-950/20",
+    };
+  }
+
+  if (value > 0) {
+    return {
+      text: "text-red-300",
+      bg: "bg-red-500",
+      border: "border-red-400/30",
+      softBg: "bg-red-950/20",
+    };
+  }
+
+  return {
+    text: "text-slate-300",
+    bg: "bg-slate-600",
+    border: "border-slate-700",
+    softBg: "bg-slate-950/40",
+  };
+}
+
+function ProgressBar({ value }) {
+  const safeValue = Math.max(0, Math.min(100, Number(value || 0)));
+  const scoreValue = safeValue / 10;
+  const tone = getScoreTone(scoreValue);
+
+  return (
+    <div className="mt-3">
+      <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+        <div
+          className={`h-full rounded-full ${tone.bg}`}
+          style={{ width: `${safeValue}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function OverviewCard({ label, value, subtext }) {
+  return (
+    <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
+      <p className="text-sm text-slate-400">{label}</p>
+      <p className="mt-2 text-4xl font-bold text-white">{value}</p>
+      <p className="mt-2 text-sm text-slate-500">{subtext}</p>
+    </div>
+  );
+}
+
+function ModuleCard({ title, total, average, description }) {
+  const readiness = Math.round(Number(average || 0) * 10);
+  const tone = getScoreTone(Number(average || 0));
+
+  return (
+    <div
+      className={`rounded-2xl border ${tone.border} ${tone.softBg} p-5 shadow-xl`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-xl font-bold text-white">{title}</h3>
+          <p className="mt-1 text-sm leading-6 text-slate-400">
+            {description}
+          </p>
+        </div>
+
+        <span
+          className={`rounded-full border ${tone.border} px-3 py-1 text-xs font-semibold ${tone.text}`}
+        >
+          {getReadinessLabel(readiness)}
+        </span>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-4">
+        <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+          <p className="text-xs text-slate-400">Total</p>
+          <p className="mt-1 text-2xl font-bold text-white">{total}</p>
+        </div>
+
+        <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+          <p className="text-xs text-slate-400">Average</p>
+          <p className="mt-1 text-2xl font-bold text-white">
+            {Number(average || 0).toFixed(1)}/10
+          </p>
+        </div>
+      </div>
+
+      <ProgressBar value={readiness} />
+
+      <p className="mt-2 text-xs text-slate-500">Readiness: {readiness}%</p>
+    </div>
+  );
+}
+
+function EmptyBox({ title, message = "No saved records found yet." }) {
+  return (
+    <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-5 text-center">
+      <p className="font-semibold text-white">{title}</p>
+      <p className="mt-1 text-sm text-slate-400">{message}</p>
+    </div>
+  );
+}
+
+function SectionCard({ title, children }) {
+  return (
+    <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5 shadow-xl">
+      <h2 className="mb-4 text-xl font-bold text-white">{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+function CompactRecord({ title, subtitle, date }) {
+  return (
+    <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+      <p className="font-semibold text-white">{title}</p>
+      <p className="mt-1 text-sm leading-6 text-slate-400">{subtitle}</p>
+      <p className="mt-1 text-xs text-slate-500">{formatDate(date)}</p>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -54,8 +207,7 @@ export default function DashboardPage() {
   const projectChallenge = history?.project_challenge || [];
   const voiceInterview = history?.voice_interview || [];
 
-  const mlTotal =
-    stats?.ml_practice?.total_attempts ?? mlPractice.length ?? 0;
+  const mlTotal = stats?.ml_practice?.total_attempts ?? mlPractice.length ?? 0;
   const dsaTotal =
     stats?.dsa_practice?.total_attempts ?? dsaPractice.length ?? 0;
   const projectTotal =
@@ -163,18 +315,11 @@ export default function DashboardPage() {
       current.types.add(type);
     }
 
-    mlPractice.forEach((item) =>
-      addTopic(item.topic, item.score, "ML Practice")
-    );
-
-    dsaPractice.forEach((item) =>
-      addTopic(item.topic, item.score, "DSA")
-    );
-
+    mlPractice.forEach((item) => addTopic(item.topic, item.score, "ML Practice"));
+    dsaPractice.forEach((item) => addTopic(item.topic, item.score, "DSA"));
     projectChallenge.forEach((item) =>
       addTopic(item.topic, item.score, "Project")
     );
-
     voiceInterview.forEach((item) =>
       addTopic(item.topic, item.average_score, "Interview")
     );
@@ -190,161 +335,6 @@ export default function DashboardPage() {
       .sort((a, b) => b.readiness - a.readiness)
       .slice(0, 10);
   }, [mlPractice, dsaPractice, projectChallenge, voiceInterview]);
-
-  function formatDate(value) {
-    if (!value) return "N/A";
-
-    try {
-      return new Date(value).toLocaleString();
-    } catch {
-      return value;
-    }
-  }
-
-  function getReadinessLabel(value) {
-    if (value >= 80) return "Interview Ready";
-    if (value >= 60) return "Good Progress";
-    if (value >= 40) return "Needs Practice";
-    if (value > 0) return "Revision Needed";
-    return "No Data Yet";
-  }
-
-  function getScoreTone(value) {
-    if (value >= 8) {
-      return {
-        text: "text-emerald-300",
-        bg: "bg-emerald-500",
-        border: "border-emerald-400/30",
-        softBg: "bg-emerald-950/20",
-      };
-    }
-
-    if (value >= 6) {
-      return {
-        text: "text-yellow-300",
-        bg: "bg-yellow-500",
-        border: "border-yellow-400/30",
-        softBg: "bg-yellow-950/20",
-      };
-    }
-
-    if (value > 0) {
-      return {
-        text: "text-red-300",
-        bg: "bg-red-500",
-        border: "border-red-400/30",
-        softBg: "bg-red-950/20",
-      };
-    }
-
-    return {
-      text: "text-slate-300",
-      bg: "bg-slate-600",
-      border: "border-slate-700",
-      softBg: "bg-slate-950/40",
-    };
-  }
-
-  function ProgressBar({ value }) {
-    const safeValue = Math.max(0, Math.min(100, Number(value || 0)));
-    const scoreValue = safeValue / 10;
-    const tone = getScoreTone(scoreValue);
-
-    return (
-      <div className="mt-3">
-        <div className="h-2 overflow-hidden rounded-full bg-slate-800">
-          <div
-            className={`h-full rounded-full ${tone.bg}`}
-            style={{ width: `${safeValue}%` }}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  function OverviewCard({ label, value, subtext }) {
-    return (
-      <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
-        <p className="text-sm text-slate-400">{label}</p>
-        <p className="mt-2 text-4xl font-bold text-white">{value}</p>
-        <p className="mt-2 text-sm text-slate-500">{subtext}</p>
-      </div>
-    );
-  }
-
-  function ModuleCard({ title, total, average, description }) {
-    const readiness = Math.round(Number(average || 0) * 10);
-    const tone = getScoreTone(Number(average || 0));
-
-    return (
-      <div
-        className={`rounded-2xl border ${tone.border} ${tone.softBg} p-5 shadow-xl`}
-      >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-xl font-bold text-white">{title}</h3>
-            <p className="mt-1 text-sm leading-6 text-slate-400">
-              {description}
-            </p>
-          </div>
-
-          <span
-            className={`rounded-full border ${tone.border} px-3 py-1 text-xs font-semibold ${tone.text}`}
-          >
-            {getReadinessLabel(readiness)}
-          </span>
-        </div>
-
-        <div className="mt-5 grid grid-cols-2 gap-4">
-          <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
-            <p className="text-xs text-slate-400">Total</p>
-            <p className="mt-1 text-2xl font-bold text-white">{total}</p>
-          </div>
-
-          <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
-            <p className="text-xs text-slate-400">Average</p>
-            <p className="mt-1 text-2xl font-bold text-white">
-              {Number(average || 0).toFixed(1)}/10
-            </p>
-          </div>
-        </div>
-
-        <ProgressBar value={readiness} />
-
-        <p className="mt-2 text-xs text-slate-500">
-          Readiness: {readiness}%
-        </p>
-      </div>
-    );
-  }
-
-  function EmptyBox({ title, message = "No saved records found yet." }) {
-    return (
-      <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-5 text-center">
-        <p className="font-semibold text-white">{title}</p>
-        <p className="mt-1 text-sm text-slate-400">{message}</p>
-      </div>
-    );
-  }
-
-  function SectionCard({ title, children }) {
-    return (
-      <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5 shadow-xl">
-        <h2 className="mb-4 text-xl font-bold text-white">{title}</h2>
-        {children}
-      </div>
-    );
-  }
-
-  function CompactRecord({ title, subtitle, date }) {
-    return (
-      <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
-        <p className="font-semibold text-white">{title}</p>
-        <p className="mt-1 text-sm leading-6 text-slate-400">{subtitle}</p>
-        <p className="mt-1 text-xs text-slate-500">{formatDate(date)}</p>
-      </div>
-    );
-  }
 
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-10 text-white">

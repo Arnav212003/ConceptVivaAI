@@ -91,6 +91,9 @@ class ProjectAttempt(Base):
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String(255), index=True, nullable=False)
 
+    # kis challenge ka attempt hai ye track karne ke liye
+    challenge_id = Column(String(255), index=True, default="")
+
     domain = Column(String(255), default="Machine Learning")
     topic = Column(String(255), nullable=False)
     difficulty = Column(String(50), default="Beginner")

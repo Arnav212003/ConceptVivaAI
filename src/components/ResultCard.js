@@ -1,82 +1,67 @@
-"use client";
+export default function ResultCard({ result }) {
+  if (!result) return null;
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+  const score = Number(result.score || 0);
 
-export default function Navbar() {
-  const pathname = usePathname();
+  function getScoreTone(value) {
+    if (value >= 8) {
+      return {
+        text: "text-emerald-300",
+        border: "border-emerald-400/30",
+        bg: "bg-emerald-950/20",
+      };
+    }
 
-  function isActive(path) {
-    return pathname === path;
+    if (value >= 6) {
+      return {
+        text: "text-yellow-300",
+        border: "border-yellow-400/30",
+        bg: "bg-yellow-950/20",
+      };
+    }
+
+    return {
+      text: "text-red-300",
+      border: "border-red-400/30",
+      bg: "bg-red-950/20",
+    };
   }
 
+  const tone = getScoreTone(score);
+
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-800 bg-slate-950/90 backdrop-blur-xl">
-      <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 text-white">
-        <Link href="/" className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-pink-500 text-xl font-black text-white shadow-lg">
-            CV
-          </div>
-
-          <div>
-            <h1 className="text-xl font-extrabold leading-none">
-              ConceptVivaAI
-            </h1>
-            <p className="mt-1 text-xs text-slate-400">
-              AI Interview & DSA Coach
-            </p>
-          </div>
-        </Link>
-
-        <div className="hidden items-center gap-2 md:flex">
-          <Link
-            href="/"
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-              isActive("/")
-                ? "bg-slate-800 text-white"
-                : "text-slate-300 hover:bg-slate-900 hover:text-white"
-            }`}
-          >
-            Home
-          </Link>
-
-          <Link
-            href="/ml"
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-              isActive("/ml")
-                ? "bg-cyan-500/20 text-cyan-300"
-                : "text-slate-300 hover:bg-slate-900 hover:text-white"
-            }`}
-          >
-            ML Interview
-          </Link>
-
-          <Link
-            href="/dsa"
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-              isActive("/dsa")
-                ? "bg-pink-500/20 text-pink-300"
-                : "text-slate-300 hover:bg-slate-900 hover:text-white"
-            }`}
-          >
-            DSA Practice
-          </Link>
+    <div className={`rounded-2xl border ${tone.border} ${tone.bg} p-5`}>
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+          <p className="text-sm text-slate-400">Score</p>
+          <p className={`mt-1 text-3xl font-bold ${tone.text}`}>
+            {score}/10
+          </p>
         </div>
 
-        <div className="md:hidden">
-          <select
-            value={pathname}
-            onChange={(e) => {
-              window.location.href = e.target.value;
-            }}
-            className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none"
-          >
-            <option value="/">Home</option>
-            <option value="/ml">ML Interview</option>
-            <option value="/dsa">DSA Practice</option>
-          </select>
+        <div className="md:col-span-2 rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+          <p className="font-semibold text-white">Feedback</p>
+          <p className="mt-2 whitespace-pre-line text-sm leading-7 text-slate-200">
+            {result.feedback}
+          </p>
         </div>
-      </nav>
-    </header>
+      </div>
+
+      <div className="mt-5 rounded-xl border border-cyan-400/30 bg-cyan-950/20 p-4">
+        <p className="font-semibold text-cyan-300">Improvement Tip</p>
+        <p className="mt-2 whitespace-pre-line text-sm leading-7 text-slate-200">
+          {result.improvement}
+        </p>
+      </div>
+
+      {result.follow_up_question && (
+        <div className="mt-5 rounded-xl border border-pink-400/30 bg-pink-950/20 p-4">
+          <p className="font-semibold text-pink-300">Follow-up Question</p>
+          <p className="mt-2 text-sm leading-7 text-slate-200">
+            {result.follow_up_question}
+          </p>
+        </div>
+      )}
+    </div>
   );
 }

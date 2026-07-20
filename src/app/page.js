@@ -14,8 +14,9 @@ export default function Home() {
           </h1>
 
           <p className="mx-auto mt-5 max-w-3xl text-lg leading-8 text-slate-400">
-            Select a domain and start focused practice. Each domain has its own
-            dedicated page, practice flow, history, and performance tracking.
+            Select a domain and start focused practice. Each domain has its
+            own dedicated page, practice flow, history, and performance
+            tracking.
           </p>
         </div>
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import Link from "next/link";
 import Editor from "@monaco-editor/react";
 import {
   apiFetchWithSessionRetry,
@@ -8,18 +9,17 @@ import {
 } from "@/utils/session";
 
 export default function DSAPracticeCard() {
-  const [mode, setMode] = useState("practice");
   const [topic, setTopic] = useState("Arrays");
   const [difficulty, setDifficulty] = useState("Easy");
   const [problem, setProblem] = useState("");
+  const [problemData, setProblemData] = useState(null);
   const [solution, setSolution] = useState("");
+  const [runResult, setRunResult] = useState(null);
   const [feedback, setFeedback] = useState(null);
   const [loadingProblem, setLoadingProblem] = useState(false);
+  const [loadingRun, setLoadingRun] = useState(false);
   const [loadingFeedback, setLoadingFeedback] = useState(false);
   const [activeTab, setActiveTab] = useState("code");
-  const [dsaHistory, setDsaHistory] = useState([]);
-  const [mockQuestions, setMockQuestions] = useState([]);
-  const [selectedMockQuestion, setSelectedMockQuestion] = useState(null);
 
   const limitedExecutionTopics = [
     "Linked List",
@@ -28,14 +28,6 @@ export default function DSAPracticeCard() {
     "Graphs",
     "Dynamic Programming",
   ];
-
-  useEffect(() => {
-    const savedHistory = localStorage.getItem("conceptviva_dsa_history");
-
-    if (savedHistory) {
-      setDsaHistory(JSON.parse(savedHistory));
-    }
-  }, []);
 
   function isLimitedExecutionTopic() {
     return limitedExecutionTopics.includes(topic);
@@ -48,7 +40,15 @@ export default function DSAPracticeCard() {
         pass`;
   }
 
+  function getStarterCode() {
+    return problemData?.starter_code || getDefaultStarterCode();
+  }
+
   function getProblemName(problemText) {
+    if (problemData?.title) {
+      return problemData.title;
+    }
+
     const titleLine = problemText
       .split("\n")
       .find(
@@ -57,7 +57,7 @@ export default function DSAPracticeCard() {
           line.trim().startsWith("Question Title:")
       );
 
-    if (!titleLine) return selectedMockQuestion?.title || "DSA Problem";
+    if (!titleLine) return "DSA Problem";
 
     return titleLine
       .replace("Problem:", "")
@@ -72,7 +72,7 @@ export default function DSAPracticeCard() {
       id: Date.now(),
       date: today.toLocaleDateString(),
       time: today.toLocaleTimeString(),
-      mode: mode === "practice" ? "Practice" : "Mock Interview",
+      mode: "Practice",
       topic,
       difficulty,
       problemName: getProblemName(problem),
@@ -81,13 +81,17 @@ export default function DSAPracticeCard() {
         Number(resultData.score ?? 0) >= 7 ? "Good" : "Needs Improvement",
     };
 
-    const updatedHistory = [attempt, ...dsaHistory].slice(0, 20);
-
-    setDsaHistory(updatedHistory);
-    localStorage.setItem(
-      "conceptviva_dsa_history",
-      JSON.stringify(updatedHistory)
-    );
+    try {
+      const savedHistory = localStorage.getItem("conceptviva_dsa_history");
+      const history = savedHistory ? JSON.parse(savedHistory) : [];
+      const updatedHistory = [attempt, ...history].slice(0, 20);
+      localStorage.setItem(
+        "conceptviva_dsa_history",
+        JSON.stringify(updatedHistory)
+      );
+    } catch (error) {
+      console.error("Local history update failed:", error);
+    }
 
     try {
       const session = await ensureConceptVivaSession();
@@ -100,7 +104,7 @@ export default function DSAPracticeCard() {
         body: JSON.stringify({
           action: "save",
           session_id: session.sessionId,
-          mode: mode === "practice" ? "Practice" : "Mock Interview",
+          mode: "Practice",
           topic,
           difficulty,
           problem_name: getProblemName(problem),
@@ -119,41 +123,23 @@ export default function DSAPracticeCard() {
     }
   }
 
-  function clearDsaHistory() {
-    setDsaHistory([]);
-    localStorage.removeItem("conceptviva_dsa_history");
-  }
-
   function resetWorkspace() {
     setProblem("");
+    setProblemData(null);
     setSolution("");
+    setRunResult(null);
     setFeedback(null);
     setActiveTab("code");
-    setSelectedMockQuestion(null);
   }
 
   function handleTopicChange(value) {
     setTopic(value);
     resetWorkspace();
-    setMockQuestions([]);
   }
 
   function handleDifficultyChange(value) {
     setDifficulty(value);
     resetWorkspace();
-    setMockQuestions([]);
-  }
-
-  function handleModeChange(value) {
-    setMode(value);
-    resetWorkspace();
-    setMockQuestions([]);
-
-    if (value === "mock") {
-      setDifficulty("Mixed");
-    } else {
-      setDifficulty("Easy");
-    }
   }
 
   async function generatePracticeProblem() {
@@ -175,9 +161,14 @@ export default function DSAPracticeCard() {
 
       const data = await response.json();
 
-      if (data.problem) {
-        setProblem(data.problem);
-        setSolution(data.starter_code || getDefaultStarterCode());
+      if (data.problem || data.problem_json) {
+        setProblem(data.problem || "");
+        setProblemData(data.problem_json || null);
+        setSolution(
+          data.problem_json?.starter_code ||
+            data.starter_code ||
+            getDefaultStarterCode()
+        );
       } else {
         setProblem("DSA problem generation failed. Please check backend.");
         setSolution("");
@@ -190,10 +181,19 @@ export default function DSAPracticeCard() {
     setLoadingProblem(false);
   }
 
-  async function generateMockSet() {
-    setLoadingProblem(true);
-    resetWorkspace();
-    setMockQuestions([]);
+  async function runCode() {
+    if (!problem.trim()) {
+      alert("Please generate a problem first.");
+      return;
+    }
+
+    if (!solution.trim()) {
+      alert("Please write your code first.");
+      return;
+    }
+
+    setLoadingRun(true);
+    setRunResult(null);
 
     try {
       const response = await apiFetchWithSessionRetry("/api/dsa", {
@@ -202,65 +202,31 @@ export default function DSAPracticeCard() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          action: "generateMockSet",
+          action: "evaluate",
           topic,
-          difficulty: "Mixed",
-          count: 10,
+          difficulty,
+          problem,
+          solution,
         }),
       });
 
       const data = await response.json();
 
-      if (Array.isArray(data.questions) && data.questions.length > 0) {
-        setMockQuestions(data.questions);
-      } else {
-        setProblem(
-          "Mock set generation failed. Please check /api/dsa route and backend endpoint."
-        );
-      }
-    } catch (error) {
-      setProblem("Something went wrong while generating the mock set.");
-    }
-
-    setLoadingProblem(false);
-  }
-
-  async function openMockQuestion(question) {
-    setLoadingProblem(true);
-    setSelectedMockQuestion(question);
-    setProblem("");
-    setSolution("");
-    setFeedback(null);
-    setActiveTab("code");
-
-    try {
-      const response = await apiFetchWithSessionRetry("/api/dsa", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "generateFromQuestion",
-          title: question.title || "DSA Problem",
-          topic: question.topic || topic,
-          difficulty: question.difficulty || difficulty,
-          pattern: question.pattern || "General DSA",
-        }),
+      setRunResult({
+        score: data.score ?? 0,
+        test_cases: Array.isArray(data.test_cases) ? data.test_cases : [],
       });
-
-      const data = await response.json();
-
-      if (data.problem) {
-        setProblem(data.problem);
-        setSolution(data.starter_code || getDefaultStarterCode());
-      } else {
-        setProblem("Problem generation failed for selected mock question.");
-      }
+      setActiveTab("testcase");
     } catch (error) {
-      setProblem("Something went wrong while opening this mock question.");
+      setRunResult({
+        score: 0,
+        test_cases: [],
+        error: "Something went wrong while running your code.",
+      });
+      setActiveTab("testcase");
     }
 
-    setLoadingProblem(false);
+    setLoadingRun(false);
   }
 
   async function evaluateSolution() {
@@ -307,6 +273,10 @@ export default function DSAPracticeCard() {
       };
 
       setFeedback(resultData);
+      setRunResult({
+        score: resultData.score,
+        test_cases: resultData.test_cases,
+      });
       await saveDsaAttempt(resultData);
       setActiveTab("result");
     } catch (error) {
@@ -342,6 +312,13 @@ export default function DSAPracticeCard() {
     if (value === "Medium") return "bg-yellow-950/50 text-yellow-300";
     if (value === "Hard") return "bg-red-950/50 text-red-300";
     return "bg-sky-950/50 text-sky-300";
+  }
+
+  function getDifficultyBorder(value = difficulty) {
+    if (value === "Easy") return "border-l-emerald-400";
+    if (value === "Medium") return "border-l-yellow-400";
+    if (value === "Hard") return "border-l-red-400";
+    return "border-l-sky-400";
   }
 
   function getStatusColor(status) {
@@ -383,26 +360,216 @@ export default function DSAPracticeCard() {
     monaco.editor.setTheme("conceptviva-dark");
   }
 
-  const totalAttempts = dsaHistory.length;
+  function renderLeetCodeProblem() {
+    const examples = Array.isArray(problemData.examples)
+      ? problemData.examples
+      : [];
 
-  const averageScore =
-    totalAttempts > 0
-      ? (
-          dsaHistory.reduce((sum, item) => sum + Number(item.score || 0), 0) /
-          totalAttempts
-        ).toFixed(1)
-      : "0.0";
+    const constraints = Array.isArray(problemData.constraints)
+      ? problemData.constraints
+      : [];
 
-  const todayDate = new Date().toLocaleDateString();
+    return (
+      <div>
+        <div className="flex flex-wrap items-center gap-3">
+          <h3 className="text-2xl font-bold text-white">
+            {problemData.title}
+          </h3>
 
-  const solvedToday = dsaHistory.filter((item) => item.date === todayDate).length;
+          <span
+            className={`rounded-full px-3 py-1 text-xs font-semibold ${getDifficultyBadge(
+              problemData.difficulty
+            )}`}
+          >
+            {problemData.difficulty}
+          </span>
+        </div>
 
-  const lastTopic = dsaHistory[0]?.topic || "N/A";
+        <div className="mt-3 flex flex-wrap gap-2">
+          {problemData.topic && (
+            <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">
+              {problemData.topic}
+            </span>
+          )}
+
+          {problemData.pattern && (
+            <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">
+              {problemData.pattern}
+            </span>
+          )}
+        </div>
+
+        <div className="mt-5 whitespace-pre-line text-[14px] leading-7 text-slate-100">
+          {problemData.description}
+        </div>
+
+        {examples.map((example, index) => (
+          <div key={index} className="mt-5">
+            <p className="font-semibold text-white">Example {index + 1}:</p>
+
+            <div className="mt-2 rounded-xl border border-slate-700 bg-slate-950 p-4 font-mono text-[13px] leading-6">
+              {typeof example === "object" ? (
+                <>
+                  <p>
+                    <span className="font-semibold text-slate-400">
+                      Input:{" "}
+                    </span>
+                    <span className="text-slate-100">{example.input}</span>
+                  </p>
+
+                  <p className="mt-1">
+                    <span className="font-semibold text-slate-400">
+                      Output:{" "}
+                    </span>
+                    <span className="text-slate-100">{example.output}</span>
+                  </p>
+
+                  {example.explanation && (
+                    <p className="mt-1">
+                      <span className="font-semibold text-slate-400">
+                        Explanation:{" "}
+                      </span>
+                      <span className="text-slate-300">
+                        {example.explanation}
+                      </span>
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="text-slate-100">{String(example)}</p>
+              )}
+            </div>
+          </div>
+        ))}
+
+        {constraints.length > 0 && (
+          <div className="mt-5">
+            <p className="font-semibold text-white">Constraints:</p>
+
+            <ul className="mt-2 space-y-2 pl-1">
+              {constraints.map((constraint, index) => (
+                <li key={index}>
+                  <code className="rounded-md bg-slate-950 px-2 py-1 font-mono text-[13px] text-slate-200">
+                    {constraint}
+                  </code>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {problemData.follow_up && (
+          <div className="mt-5 rounded-xl border border-slate-700 bg-slate-950/60 p-4">
+            <p className="text-sm leading-7 text-slate-300">
+              <span className="font-semibold text-white">Follow-up: </span>
+              {problemData.follow_up}
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderResultBanner(testCases) {
+    if (!Array.isArray(testCases) || testCases.length === 0) return null;
+
+    const passedCount = testCases.filter((item) =>
+      String(item.status || "").toLowerCase().includes("pass")
+    ).length;
+
+    const allPassed = passedCount === testCases.length;
+
+    return (
+      <div
+        className={`mb-5 flex items-center justify-between rounded-xl border px-5 py-4 ${
+          allPassed
+            ? "border-emerald-400/40 bg-emerald-950/30"
+            : "border-red-400/40 bg-red-950/30"
+        }`}
+      >
+        <div>
+          <p
+            className={`text-lg font-bold ${
+              allPassed ? "text-emerald-300" : "text-red-300"
+            }`}
+          >
+            {allPassed ? "Accepted" : "Wrong Answer"}
+          </p>
+          <p className="mt-1 text-xs text-slate-400">
+            {passedCount} / {testCases.length} testcases passed
+          </p>
+        </div>
+
+        <span
+          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+            allPassed
+              ? "bg-emerald-950/60 text-emerald-300"
+              : "bg-red-950/60 text-red-300"
+          }`}
+        >
+          {allPassed ? "✓ Passed" : "✕ Failed"}
+        </span>
+      </div>
+    );
+  }
+
+  function renderTestCaseList(testCases) {
+    if (!Array.isArray(testCases) || testCases.length === 0) {
+      return (
+        <p className="text-sm text-slate-400">No test cases returned.</p>
+      );
+    }
+
+    return (
+      <div className="space-y-3">
+        {testCases.map((item, index) => (
+          <div
+            key={index}
+            className="rounded-xl border border-slate-700 bg-slate-900/70 p-4"
+          >
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="font-semibold text-white">Case {index + 1}</p>
+
+              <span
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusColor(
+                  item.status
+                )}`}
+              >
+                {item.status || "Not Executed"}
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-400">Input</p>
+            <pre className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-950 p-3 font-mono text-xs text-slate-200">
+              {item.input}
+            </pre>
+
+            <p className="mt-3 text-xs text-slate-400">Expected Output</p>
+            <pre className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-950 p-3 font-mono text-xs text-slate-200">
+              {item.expected_output}
+            </pre>
+
+            <p className="mt-3 text-xs text-slate-400">Actual Output</p>
+            <pre className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-950 p-3 font-mono text-xs text-slate-200">
+              {item.actual_output || "N/A"}
+            </pre>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="mt-10 w-full max-w-6xl rounded-3xl border border-slate-700 bg-slate-950/70 p-4 shadow-2xl">
       <div className="mb-5 border-b border-slate-800 pb-5">
-        <p className="text-sm font-semibold uppercase tracking-widest text-pink-300">
+        <Link
+          href="/dsa"
+          className="text-sm font-semibold text-pink-300 hover:text-pink-200"
+        >
+          ← Back to DSA Home
+        </Link>
+
+        <p className="mt-3 text-sm font-semibold uppercase tracking-widest text-pink-300">
           DSA Practice Mode
         </p>
 
@@ -411,33 +578,9 @@ export default function DSAPracticeCard() {
         </h2>
 
         <p className="mt-1 text-base text-slate-400">
-          Choose practice or mock interview mode, select topic and difficulty,
-          then generate questions.
+          Select topic and difficulty, generate one question, and submit for
+          AI evaluation.
         </p>
-      </div>
-
-      <div className="mb-5 grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Total Local Attempts</p>
-          <p className="mt-1 text-3xl font-bold text-white">{totalAttempts}</p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Local Average Score</p>
-          <p className="mt-1 text-3xl font-bold text-white">
-            {averageScore}/10
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Solved Today</p>
-          <p className="mt-1 text-3xl font-bold text-white">{solvedToday}</p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Last Local Topic</p>
-          <p className="mt-1 text-xl font-bold text-white">{lastTopic}</p>
-        </div>
       </div>
 
       {isLimitedExecutionTopic() && (
@@ -448,46 +591,10 @@ export default function DSAPracticeCard() {
           <p className="mt-2 text-sm leading-7 text-slate-200">
             This topic can involve complex structures. Current evaluation is
             AI-assisted and focuses on logic, approach, complexity, and
-            explanation. Open Dashboard to view backend-saved attempts.
+            explanation.
           </p>
         </div>
       )}
-
-      <div className="mb-5 rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
-        <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-pink-300">
-          Select Mode
-        </p>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <button
-            onClick={() => handleModeChange("practice")}
-            className={`rounded-2xl border p-4 text-left transition ${
-              mode === "practice"
-                ? "border-pink-400 bg-pink-950/30"
-                : "border-slate-700 bg-slate-950/40 hover:border-slate-500"
-            }`}
-          >
-            <p className="text-lg font-bold text-white">DSA Practice</p>
-            <p className="mt-1 text-sm text-slate-400">
-              Generate one question, solve it, and submit for AI evaluation.
-            </p>
-          </button>
-
-          <button
-            onClick={() => handleModeChange("mock")}
-            className={`rounded-2xl border p-4 text-left transition ${
-              mode === "mock"
-                ? "border-emerald-400 bg-emerald-950/30"
-                : "border-slate-700 bg-slate-950/40 hover:border-slate-500"
-            }`}
-          >
-            <p className="text-lg font-bold text-white">DSA Mock Interview</p>
-            <p className="mt-1 text-sm text-slate-400">
-              Generate a 10-question mixed set: 3 Easy, 4 Medium, 3 Hard.
-            </p>
-          </button>
-        </div>
-      </div>
 
       <div className="mb-5 rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
         <div className="grid gap-4 md:grid-cols-3">
@@ -521,100 +628,33 @@ export default function DSAPracticeCard() {
             <select
               value={difficulty}
               onChange={(e) => handleDifficultyChange(e.target.value)}
-              disabled={mode === "mock"}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-base text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-base text-white outline-none"
             >
-              {mode === "mock" && <option>Mixed</option>}
               <option>Easy</option>
               <option>Medium</option>
               <option>Hard</option>
             </select>
-
-            {mode === "mock" && (
-              <p className="mt-2 text-xs text-slate-400">
-                Mock mode uses mixed ratio automatically.
-              </p>
-            )}
           </div>
 
           <div className="flex items-end">
-            {mode === "practice" ? (
-              <button
-                onClick={generatePracticeProblem}
-                disabled={loadingProblem}
-                className="w-full rounded-xl bg-pink-500 px-6 py-3 text-base font-semibold text-white transition hover:bg-pink-600 disabled:opacity-60"
-              >
-                {loadingProblem ? "Generating..." : "Generate Problem"}
-              </button>
-            ) : (
-              <button
-                onClick={generateMockSet}
-                disabled={loadingProblem}
-                className="w-full rounded-xl bg-emerald-500 px-6 py-3 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:opacity-60"
-              >
-                {loadingProblem ? "Generating..." : "Generate Mock Set"}
-              </button>
-            )}
+            <button
+              onClick={generatePracticeProblem}
+              disabled={loadingProblem}
+              className="w-full rounded-xl bg-pink-500 px-6 py-3 text-base font-semibold text-white transition hover:bg-pink-600 disabled:opacity-60"
+            >
+              {loadingProblem ? "Generating..." : "Generate Problem"}
+            </button>
           </div>
         </div>
       </div>
 
-      {mode === "mock" && mockQuestions.length > 0 && (
-        <div className="mb-5 rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
-          <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h3 className="text-xl font-bold text-white">
-                Mock Interview Question Set
-              </h3>
-              <p className="text-sm text-slate-400">
-                Click any question to generate its full problem statement.
-              </p>
-            </div>
-
-            <span className="rounded-full bg-slate-800 px-4 py-2 text-sm text-slate-300">
-              10 Questions · 3 Easy + 4 Medium + 3 Hard
-            </span>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            {mockQuestions.map((question, index) => (
-              <button
-                key={question.id || index}
-                onClick={() => openMockQuestion(question)}
-                className={`rounded-xl border p-4 text-left transition ${
-                  selectedMockQuestion?.id === question.id
-                    ? "border-pink-400 bg-pink-950/30"
-                    : "border-slate-700 bg-slate-950/40 hover:border-slate-500"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm text-slate-400">
-                      Question {index + 1}
-                    </p>
-                    <p className="mt-1 font-semibold text-white">
-                      {question.title}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      {question.pattern}
-                    </p>
-                  </div>
-
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${getDifficultyBadge(
-                      question.difficulty
-                    )}`}
-                  >
-                    {question.difficulty}
-                  </span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="grid min-h-[680px] gap-4 lg:grid-cols-2">
+      <div
+        className={`grid min-h-[680px] gap-4 lg:grid-cols-2 ${
+          problemData
+            ? `border-l-4 ${getDifficultyBorder(problemData.difficulty)} rounded-l-2xl`
+            : ""
+        }`}
+      >
         <div className="rounded-2xl border border-slate-800 bg-slate-900/80">
           <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
             <div>
@@ -629,12 +669,14 @@ export default function DSAPracticeCard() {
             </div>
 
             <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">
-              {mode === "practice" ? "Practice" : "Mock"}
+              Practice
             </span>
           </div>
 
           <div className="max-h-[600px] overflow-y-auto p-5">
-            {problem ? (
+            {problemData ? (
+              renderLeetCodeProblem()
+            ) : problem ? (
               <div className="whitespace-pre-line text-[14px] leading-7 text-slate-100">
                 {problem}
               </div>
@@ -645,9 +687,7 @@ export default function DSAPracticeCard() {
                     No problem generated yet
                   </p>
                   <p className="mt-2 text-sm text-slate-400">
-                    {mode === "practice"
-                      ? "Select topic and difficulty, then click Generate Problem."
-                      : "Generate a mock set, then click one question from the list."}
+                    Select topic and difficulty, then click Generate Problem.
                   </p>
                 </div>
               </div>
@@ -659,21 +699,37 @@ export default function DSAPracticeCard() {
           <div className="flex border-b border-slate-800">
             <button
               onClick={() => setActiveTab("code")}
-              className={`px-5 py-4 text-sm font-semibold ${
+              className={`px-5 py-4 text-sm font-semibold transition ${
                 activeTab === "code"
                   ? "border-b-2 border-pink-400 text-white"
-                  : "text-slate-400"
+                  : "text-slate-400 hover:text-slate-200"
               }`}
             >
-              Code
+              {"</>"} Code
+            </button>
+
+            <button
+              onClick={() => setActiveTab("testcase")}
+              className={`px-5 py-4 text-sm font-semibold transition ${
+                activeTab === "testcase"
+                  ? "border-b-2 border-cyan-400 text-white"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              Testcase
+              {runResult?.test_cases?.length > 0 && (
+                <span className="ml-2 rounded-full bg-slate-800 px-2 py-0.5 text-xs">
+                  {runResult.test_cases.length}
+                </span>
+              )}
             </button>
 
             <button
               onClick={() => setActiveTab("result")}
-              className={`px-5 py-4 text-sm font-semibold ${
+              className={`px-5 py-4 text-sm font-semibold transition ${
                 activeTab === "result"
                   ? "border-b-2 border-emerald-400 text-white"
-                  : "text-slate-400"
+                  : "text-slate-400 hover:text-slate-200"
               }`}
             >
               Result
@@ -685,8 +741,8 @@ export default function DSAPracticeCard() {
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-sm text-slate-400">Language</p>
 
-                <span className="rounded-lg bg-slate-800 px-3 py-1 text-sm text-slate-200">
-                  Python
+                <span className="rounded-lg bg-slate-800 px-3 py-1 font-mono text-sm text-slate-200">
+                  Python3
                 </span>
               </div>
 
@@ -742,31 +798,66 @@ export default function DSAPracticeCard() {
 
               <div className="mt-4 flex flex-wrap gap-3">
                 <button
+                  onClick={runCode}
+                  disabled={loadingRun || loadingFeedback || !problem}
+                  className="rounded-xl bg-slate-700 px-6 py-3 text-base font-semibold text-white transition hover:bg-slate-600 disabled:opacity-60"
+                >
+                  {loadingRun ? "Running..." : "▶ Run Code"}
+                </button>
+
+                <button
                   onClick={evaluateSolution}
-                  disabled={loadingFeedback || !problem}
+                  disabled={loadingFeedback || loadingRun || !problem}
                   className="rounded-xl bg-emerald-500 px-6 py-3 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:opacity-60"
                 >
-                  {loadingFeedback ? "Running Tests..." : "Run & Submit"}
+                  {loadingFeedback ? "Submitting..." : "Submit"}
                 </button>
 
                 <button
-                  onClick={() => setSolution(problem ? solution : "")}
+                  onClick={() => setSolution(problem ? getStarterCode() : "")}
                   disabled={!problem}
-                  className="rounded-xl bg-slate-700 px-6 py-3 text-base font-semibold text-white transition hover:bg-slate-600 disabled:opacity-60"
+                  className="rounded-xl border border-slate-700 bg-transparent px-6 py-3 text-base font-semibold text-slate-300 transition hover:bg-slate-800 disabled:opacity-60"
                 >
-                  Keep Code
-                </button>
-
-                <button
-                  onClick={() =>
-                    setSolution(problem ? getDefaultStarterCode() : "")
-                  }
-                  disabled={!problem}
-                  className="rounded-xl bg-slate-700 px-6 py-3 text-base font-semibold text-white transition hover:bg-slate-600 disabled:opacity-60"
-                >
-                  Blank Reset
+                  Reset to Starter Code
                 </button>
               </div>
+            </div>
+          )}
+
+          {activeTab === "testcase" && (
+            <div className="max-h-[600px] overflow-y-auto p-5">
+              {loadingRun ? (
+                <div className="flex min-h-[300px] items-center justify-center">
+                  <p className="text-sm text-slate-400">
+                    Running your code against test cases...
+                  </p>
+                </div>
+              ) : runResult ? (
+                <div>
+                  {runResult.error ? (
+                    <div className="rounded-xl border border-red-400/40 bg-red-950/30 p-5 text-red-200">
+                      {runResult.error}
+                    </div>
+                  ) : (
+                    <>
+                      {renderResultBanner(runResult.test_cases)}
+                      {renderTestCaseList(runResult.test_cases)}
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="flex min-h-[500px] items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-6 text-center">
+                  <div>
+                    <p className="text-lg font-semibold text-white">
+                      No run yet
+                    </p>
+                    <p className="mt-2 text-sm text-slate-400">
+                      Click "Run Code" to check your solution against the
+                      test cases without saving an attempt.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -774,6 +865,8 @@ export default function DSAPracticeCard() {
             <div className="max-h-[600px] overflow-y-auto p-5">
               {feedback ? (
                 <div>
+                  {renderResultBanner(feedback.test_cases)}
+
                   <div className="mb-5 rounded-2xl border border-emerald-400/30 bg-emerald-950/30 p-5">
                     <p className="text-sm text-slate-400">Score</p>
 
@@ -786,54 +879,7 @@ export default function DSAPracticeCard() {
                     <h4 className="mb-3 text-base font-semibold text-white">
                       Test Cases
                     </h4>
-
-                    {feedback.test_cases.length > 0 ? (
-                      <div className="space-y-3">
-                        {feedback.test_cases.map((item, index) => (
-                          <div
-                            key={index}
-                            className="rounded-xl border border-slate-700 bg-slate-900/70 p-4"
-                          >
-                            <div className="mb-2 flex items-center justify-between gap-3">
-                              <p className="font-semibold text-white">
-                                Test Case {index + 1}
-                              </p>
-
-                              <span
-                                className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusColor(
-                                  item.status
-                                )}`}
-                              >
-                                {item.status || "Not Executed"}
-                              </span>
-                            </div>
-
-                            <p className="text-xs text-slate-400">Input</p>
-                            <pre className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs text-slate-200">
-                              {item.input}
-                            </pre>
-
-                            <p className="mt-3 text-xs text-slate-400">
-                              Expected Output
-                            </p>
-                            <pre className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs text-slate-200">
-                              {item.expected_output}
-                            </pre>
-
-                            <p className="mt-3 text-xs text-slate-400">
-                              Actual Output
-                            </p>
-                            <pre className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs text-slate-200">
-                              {item.actual_output || "N/A"}
-                            </pre>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-400">
-                        No test cases returned.
-                      </p>
-                    )}
+                    {renderTestCaseList(feedback.test_cases)}
                   </div>
 
                   <div className="mb-5 rounded-2xl border border-slate-700 bg-slate-950/50 p-5">
@@ -876,14 +922,14 @@ export default function DSAPracticeCard() {
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
                       <p className="text-sm text-slate-400">Time Complexity</p>
-                      <p className="mt-1 text-base font-semibold text-white">
+                      <p className="mt-1 font-mono text-base font-semibold text-white">
                         {feedback.time_complexity}
                       </p>
                     </div>
 
                     <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
                       <p className="text-sm text-slate-400">Space Complexity</p>
-                      <p className="mt-1 text-base font-semibold text-white">
+                      <p className="mt-1 font-mono text-base font-semibold text-white">
                         {feedback.space_complexity}
                       </p>
                     </div>
@@ -896,8 +942,8 @@ export default function DSAPracticeCard() {
                       No result yet
                     </p>
                     <p className="mt-2 text-sm text-slate-400">
-                      Generate a problem, write your solution, and click Run &
-                      Submit.
+                      Write your solution and click Submit for full AI
+                      evaluation and to save this attempt.
                     </p>
                   </div>
                 </div>
@@ -907,86 +953,17 @@ export default function DSAPracticeCard() {
         </div>
       </div>
 
-      <div className="mt-8 rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
-        <div className="mb-4 flex items-center justify-between gap-4">
-          <div>
-            <h3 className="text-xl font-bold text-white">
-              Recent DSA Practice History
-            </h3>
-            <p className="text-sm text-slate-400">
-              This section shows browser history for quick review. Open
-              Dashboard to view backend database records.
-            </p>
-          </div>
-
-          <button
-            onClick={clearDsaHistory}
-            disabled={dsaHistory.length === 0}
-            className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
-          >
-            Clear Local History
-          </button>
-        </div>
-
-        {dsaHistory.length > 0 ? (
-          <div className="max-h-72 overflow-y-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-slate-400">
-                <tr className="border-b border-slate-700">
-                  <th className="py-3 pr-3">Date</th>
-                  <th className="py-3 pr-3">Mode</th>
-                  <th className="py-3 pr-3">Problem</th>
-                  <th className="py-3 pr-3">Topic</th>
-                  <th className="py-3 pr-3">Difficulty</th>
-                  <th className="py-3 pr-3">Score</th>
-                  <th className="py-3 pr-3">Status</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {dsaHistory.map((item) => (
-                  <tr key={item.id} className="border-b border-slate-800">
-                    <td className="py-3 pr-3 text-slate-300">
-                      {item.date} {item.time}
-                    </td>
-                    <td className="py-3 pr-3 text-slate-300">
-                      {item.mode || "Practice"}
-                    </td>
-                    <td className="py-3 pr-3 font-semibold text-white">
-                      {item.problemName}
-                    </td>
-                    <td className="py-3 pr-3 text-slate-300">{item.topic}</td>
-                    <td className="py-3 pr-3 text-slate-300">
-                      {item.difficulty}
-                    </td>
-                    <td className="py-3 pr-3 font-bold text-white">
-                      {item.score}/10
-                    </td>
-                    <td className="py-3 pr-3">
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                          item.status === "Good"
-                            ? "bg-emerald-950/40 text-emerald-300"
-                            : "bg-yellow-950/40 text-yellow-300"
-                        }`}
-                      >
-                        {item.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-6 text-center">
-            <p className="font-semibold text-white">No DSA history yet</p>
-            <p className="mt-2 text-sm text-slate-400">
-              Submit your first solution to start tracking practice.
-            </p>
-          </div>
-        )}
+      <div className="mt-6 text-center">
+        <Link
+          href="/dsa/history"
+          className="text-sm font-semibold text-cyan-300 hover:text-cyan-200"
+        >
+          View full practice history →
+        </Link>
       </div>
     </div>
   );
 }
+
+
+

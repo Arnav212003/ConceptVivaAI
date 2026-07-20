@@ -4,6 +4,8 @@ import re
 import sys
 import tempfile
 import subprocess
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 from fastapi import FastAPI, Depends, Header, HTTPException
@@ -25,6 +27,7 @@ from crud import (
     get_dashboard_stats,
     get_project_challenge_by_id,
     get_user_history,
+    mark_project_challenge_completed,
 )
 
 from security import (
@@ -74,8 +77,13 @@ except Exception:
         return None
 
 
-load_dotenv("../.env.local")
-load_dotenv(".env")
+# the old relative path "../.env.local" depended on the current working
+# directory, so switched to an absolute Path-based load like security.py
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
+
+load_dotenv(PROJECT_ROOT / ".env.local")
+load_dotenv(BASE_DIR / ".env")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
@@ -267,17 +275,6 @@ def extract_question_id_from_problem_text(problem_text):
     return None
 
 
-def build_question_metadata_text(question):
-    return f"""
-Question ID: {question.get("id", "")}
-Question Title: {question.get("title", "")}
-Topic: {question.get("topic", "")}
-Difficulty: {question.get("difficulty", "")}
-Pattern: {question.get("pattern", "")}
-Source: {question.get("source", "")}
-"""
-
-
 def get_difficulty_distribution(questions):
     easy = 0
     medium = 0
@@ -367,6 +364,7 @@ def serialize_project_attempt(item):
     return {
         "id": item.id,
         "session_id": item.session_id,
+        "challenge_id": item.challenge_id,
         "domain": item.domain,
         "topic": item.topic,
         "difficulty": item.difficulty,
@@ -384,7 +382,44 @@ def serialize_project_attempt(item):
     }
 
 
-def generate_dsa_problem_from_gemini(question):
+def get_default_starter_code():
+    return """class Solution:
+    def solve(self):
+        # Write your code here
+        pass"""
+
+
+def get_fallback_problem_json(question):
+    # returns the same JSON shape even when Gemini is unavailable or fails,
+    # so the frontend never has to handle a different response format
+
+    title = question.get("title", "DSA Problem")
+
+    return {
+        "question_id": question.get("id", ""),
+        "title": title,
+        "topic": question.get("topic", "DSA"),
+        "difficulty": question.get("difficulty", "Medium"),
+        "pattern": question.get("pattern", "General DSA"),
+        "description": (
+            f'Solve the problem "{title}" using the most suitable DSA technique. '
+            "Think about the correct pattern and edge cases before coding.\n\n"
+            "Note: Gemini API is currently unavailable, so this is a fallback "
+            "problem shell without detailed statement."
+        ),
+        "examples": [],
+        "constraints": [],
+        "follow_up": "",
+        "starter_code": get_default_starter_code(),
+    }
+
+
+def generate_dsa_problem_json_from_gemini(question):
+    # generates a LeetCode-style structured question.
+    # earlier this returned plain text which just looked like one big blob
+    # on the frontend, so now it returns JSON and the UI can render proper
+    # sections (title, examples, constraints, etc.)
+
     title = question.get("title", "DSA Problem")
     topic = question.get("topic", "DSA")
     difficulty = question.get("difficulty", "Medium")
@@ -392,30 +427,12 @@ def generate_dsa_problem_from_gemini(question):
     question_id = question.get("id", "")
 
     if not GEMINI_API_KEY or not client:
-        return f"""
-Question ID: {question_id}
-
-Problem: {title}
-
-Topic: {topic}
-Difficulty: {difficulty}
-Pattern: {pattern}
-
-Generate and solve this problem using the correct DSA pattern.
-
-Important:
-- Write a LeetCode-style class Solution.
-- Do not change the expected function name once decided.
-- Think about edge cases.
-
-Note:
-Gemini API is currently unavailable, so this is a fallback problem shell.
-"""
+        return get_fallback_problem_json(question)
 
     prompt = f"""
 You are ConceptVivaAI, a strict DSA practice problem generator.
 
-Generate a coding practice problem for the user.
+Generate a coding practice problem in the exact style and tone of LeetCode.
 
 Question metadata:
 Question ID: {question_id}
@@ -425,47 +442,38 @@ Difficulty: {difficulty}
 Pattern: {pattern}
 
 Very important rules:
-1. Do NOT provide the solution.
-2. Do NOT provide optimized code.
-3. Do NOT explain the answer.
-4. Only provide the problem statement and starter code.
-5. The problem should be interview-style and LeetCode/GFG-style.
-6. Include input format, output format, constraints, and 2-3 sample test cases.
-7. Include one expected Python starter code using class Solution.
-8. Keep the function name natural for this problem.
-9. Stay strictly aligned with the title, topic, difficulty, and pattern.
-10. Do not hallucinate a different problem.
+1. Do NOT provide the solution or optimized code.
+2. Do NOT explain the answer.
+3. The problem must read exactly like a real LeetCode problem page.
+4. Give 2-3 examples. Each example must have input, output, and a short explanation.
+5. Constraints must look like LeetCode constraints, for example "1 <= nums.length <= 10^4".
+6. Starter code must be Python, using class Solution with a natural function name for this problem.
+7. In the description, keep paragraphs short and clear. Refer to variables like nums, target, s, n naturally.
+8. Stay strictly aligned with the given title, topic, difficulty, and pattern. Do not invent a different problem.
+9. follow_up is optional. If a natural follow-up exists (like a better complexity), include it, otherwise return empty string.
 
-Return the response in clean text format like this:
-
-Question ID: {question_id}
-
-Problem: {title}
-
-Difficulty: {difficulty}
-Topic: {topic}
-Pattern: {pattern}
-
-Problem Statement:
-...
-
-Input Format:
-...
-
-Output Format:
-...
-
-Constraints:
-...
-
-Examples:
-...
-
-Starter Code:
-class Solution:
-    def functionName(self, ...):
-        # Write your code here
-        pass
+Return only valid JSON in this exact format:
+{{
+  "question_id": "{question_id}",
+  "title": "{title}",
+  "difficulty": "{difficulty}",
+  "topic": "{topic}",
+  "pattern": "{pattern}",
+  "description": "LeetCode-style problem description with short clear paragraphs",
+  "examples": [
+    {{
+      "input": "nums = [2,7,11,15], target = 9",
+      "output": "[0,1]",
+      "explanation": "Because nums[0] + nums[1] == 9, we return [0, 1]."
+    }}
+  ],
+  "constraints": [
+    "2 <= nums.length <= 10^4",
+    "-10^9 <= nums[i] <= 10^9"
+  ],
+  "follow_up": "optional follow-up question or empty string",
+  "starter_code": "class Solution:\\n    def functionName(self, ...):\\n        # Write your code here\\n        pass"
+}}
 """
 
     try:
@@ -474,30 +482,94 @@ class Solution:
             contents=prompt
         )
 
-        return response.text
+        result = extract_json(response.text)
+
+        if not result:
+            return get_fallback_problem_json(question)
+
+        # force-set question_id because the evaluation step looks up
+        # the question in the bank using this exact id
+        result["question_id"] = question_id
+
+        result.setdefault("title", title)
+        result.setdefault("difficulty", difficulty)
+        result.setdefault("topic", topic)
+        result.setdefault("pattern", pattern)
+        result.setdefault("description", f'Solve the problem "{title}".')
+        result.setdefault("examples", [])
+        result.setdefault("constraints", [])
+        result.setdefault("follow_up", "")
+        result.setdefault("starter_code", get_default_starter_code())
+
+        if not isinstance(result["examples"], list):
+            result["examples"] = []
+
+        if not isinstance(result["constraints"], list):
+            result["constraints"] = []
+
+        return result
 
     except Exception:
-        return f"""
-Question ID: {question_id}
+        return get_fallback_problem_json(question)
 
-Problem: {title}
 
-Topic: {topic}
-Difficulty: {difficulty}
-Pattern: {pattern}
+def build_problem_text_from_json(problem_json):
+    # builds a plain text version from the JSON.
+    # needed for the evaluation flow, since the frontend sends back the
+    # problem text when evaluating, and the backend extracts the Question ID
+    # from that text
 
-Problem Statement:
-Solve the problem "{title}" using the most suitable DSA technique.
+    lines = []
 
-Expected Function:
-class Solution:
-    def solve(self):
-        # Write your code here
-        pass
+    lines.append(f"Question ID: {problem_json.get('question_id', '')}")
+    lines.append("")
+    lines.append(f"Problem: {problem_json.get('title', 'DSA Problem')}")
+    lines.append("")
+    lines.append(f"Difficulty: {problem_json.get('difficulty', '')}")
+    lines.append(f"Topic: {problem_json.get('topic', '')}")
+    lines.append(f"Pattern: {problem_json.get('pattern', '')}")
+    lines.append("")
+    lines.append("Problem Statement:")
+    lines.append(problem_json.get("description", ""))
 
-Note:
-Gemini API is currently unavailable, so detailed problem generation failed.
-"""
+    examples = problem_json.get("examples", [])
+
+    if examples:
+        lines.append("")
+        lines.append("Examples:")
+
+        for index, example in enumerate(examples, start=1):
+            if not isinstance(example, dict):
+                lines.append(f"Example {index}: {example}")
+                continue
+
+            lines.append(f"Example {index}:")
+            lines.append(f"Input: {example.get('input', '')}")
+            lines.append(f"Output: {example.get('output', '')}")
+
+            if example.get("explanation"):
+                lines.append(f"Explanation: {example.get('explanation')}")
+
+            lines.append("")
+
+    constraints = problem_json.get("constraints", [])
+
+    if constraints:
+        lines.append("Constraints:")
+
+        for constraint in constraints:
+            lines.append(f"- {constraint}")
+
+        lines.append("")
+
+    if problem_json.get("follow_up"):
+        lines.append(f"Follow-up: {problem_json.get('follow_up')}")
+        lines.append("")
+
+    lines.append("Starter Code:")
+    lines.append(problem_json.get("starter_code", get_default_starter_code()))
+
+    return "\n".join(lines)
 
 
 def evaluate_bank_dsa_solution_with_gemini(question, problem_text, solution):
@@ -1048,10 +1120,16 @@ def run_python_tests(topic, solution):
         "tests": tests,
     }
 
+    # NOTE: earlier the payload was dumped directly into the f-string,
+    # which meant JSON's true/false ended up as bare words in the generated
+    # Python code and caused a NameError. Now the JSON is passed in as a
+    # string and parsed with json.loads inside the runner instead.
+    payload_json = json.dumps(payload)
+
     runner_code = f"""
 import json
 
-payload = {json.dumps(payload)}
+payload = json.loads({json.dumps(payload_json)})
 topic_key = payload["topic_key"]
 user_code = payload["solution"]
 tests = payload["tests"]
@@ -1410,7 +1488,10 @@ def dsa_question_bank_stats():
 
 
 @app.post("/generate-dsa-mock-set")
-def generate_dsa_mock_set(request: DSAMockSetRequest):
+def generate_dsa_mock_set(
+    request: DSAMockSetRequest,
+    session_id: str = Depends(get_current_session_id),
+):
     questions = get_dsa_mock_set(
         topic=request.topic,
         difficulty=request.difficulty,
@@ -1429,7 +1510,10 @@ def generate_dsa_mock_set(request: DSAMockSetRequest):
 
 
 @app.post("/generate-dsa-practice-question")
-def generate_dsa_practice_question(request: DSAPracticeQuestionRequest):
+def generate_dsa_practice_question(
+    request: DSAPracticeQuestionRequest,
+    session_id: str = Depends(get_current_session_id),
+):
     question = get_dsa_practice_question(
         topic=request.topic,
         difficulty=request.difficulty
@@ -1440,21 +1524,29 @@ def generate_dsa_practice_question(request: DSAPracticeQuestionRequest):
             "mode": "practice",
             "question": None,
             "problem": get_fallback_dsa_problem(request.topic, request.difficulty),
+            "problem_json": None,
+            "starter_code": get_default_starter_code(),
             "message": "No matching question found in DSA bank. Fallback problem returned.",
         }
 
-    problem_text = generate_dsa_problem_from_gemini(question)
+    problem_json = generate_dsa_problem_json_from_gemini(question)
+    problem_text = build_problem_text_from_json(problem_json)
 
     return {
         "mode": "practice",
         "question": question,
         "problem": problem_text,
+        "problem_json": problem_json,
+        "starter_code": problem_json.get("starter_code", get_default_starter_code()),
         "message": "Practice question generated successfully.",
     }
 
 
 @app.post("/generate-own-dsa-question")
-def generate_own_dsa_question(request: DSAOwnQuestionRequest):
+def generate_own_dsa_question(
+    request: DSAOwnQuestionRequest,
+    session_id: str = Depends(get_current_session_id),
+):
     question = {
         "id": "custom_user_question",
         "title": request.title,
@@ -1464,18 +1556,24 @@ def generate_own_dsa_question(request: DSAOwnQuestionRequest):
         "source": "User Provided",
     }
 
-    problem_text = generate_dsa_problem_from_gemini(question)
+    problem_json = generate_dsa_problem_json_from_gemini(question)
+    problem_text = build_problem_text_from_json(problem_json)
 
     return {
         "mode": "own_question",
         "question": question,
         "problem": problem_text,
+        "problem_json": problem_json,
+        "starter_code": problem_json.get("starter_code", get_default_starter_code()),
         "message": "Own question converted into practice problem successfully.",
     }
 
 
 @app.post("/generate-question")
-def generate_question(request: QuestionRequest):
+def generate_question(
+    request: QuestionRequest,
+    session_id: str = Depends(get_current_session_id),
+):
     if not GEMINI_API_KEY or not client:
         return {
             "question": f"Can you explain the basic concept of {request.topic}?"
@@ -1515,7 +1613,10 @@ Rules:
 
 
 @app.post("/evaluate-answer")
-def evaluate_answer(request: EvaluateRequest):
+def evaluate_answer(
+    request: EvaluateRequest,
+    session_id: str = Depends(get_current_session_id),
+):
     if not GEMINI_API_KEY or not client:
         return {
             "score": 5,
@@ -1634,7 +1735,10 @@ Return only valid JSON in this exact format:
 
 
 @app.post("/generate-dsa-problem")
-def generate_dsa_problem(request: DSAProblemRequest):
+def generate_dsa_problem(
+    request: DSAProblemRequest,
+    session_id: str = Depends(get_current_session_id),
+):
     question = get_dsa_practice_question(
         topic=request.topic,
         difficulty=request.difficulty
@@ -1643,21 +1747,29 @@ def generate_dsa_problem(request: DSAProblemRequest):
     if not question:
         return {
             "problem": get_fallback_dsa_problem(request.topic, request.difficulty),
+            "problem_json": None,
+            "starter_code": get_default_starter_code(),
             "question": None,
             "message": "No matching question found in new DSA bank. Fallback problem returned.",
         }
 
-    problem_text = generate_dsa_problem_from_gemini(question)
+    problem_json = generate_dsa_problem_json_from_gemini(question)
+    problem_text = build_problem_text_from_json(problem_json)
 
     return {
         "problem": problem_text,
+        "problem_json": problem_json,
+        "starter_code": problem_json.get("starter_code", get_default_starter_code()),
         "question": question,
         "message": "DSA problem generated from curated question bank.",
     }
 
 
 @app.post("/evaluate-dsa-solution")
-def evaluate_dsa_solution(request: DSAEvaluateRequest):
+def evaluate_dsa_solution(
+    request: DSAEvaluateRequest,
+    session_id: str = Depends(get_current_session_id),
+):
     question_id = extract_question_id_from_problem_text(request.problem)
 
     if question_id:
@@ -2209,6 +2321,15 @@ def save_project_attempt(
             "next_steps": request.next_steps,
         }
     )
+
+    # once the attempt is saved, mark the challenge as completed,
+    # otherwise the dashboard's active challenge count keeps growing forever
+    if request.challenge_id:
+        mark_project_challenge_completed(
+            db,
+            session_id=session_id,
+            challenge_id=request.challenge_id,
+        )
 
     return {
         "message": "Project attempt saved successfully.",

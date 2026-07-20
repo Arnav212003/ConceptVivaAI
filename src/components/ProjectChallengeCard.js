@@ -270,6 +270,9 @@ export default function ProjectChallengeCard() {
       setReview(reviewData);
       await saveProjectAttempt(reviewData);
     } catch (error) {
+      // even when the backend call itself fails, we still record the attempt
+      // (matching how DSAPracticeCard and InterviewCard handle their errors)
+      // so a failed submission doesn't just silently disappear
       const reviewData = {
         score: 0,
         verdict: "WEAK",
@@ -282,6 +285,7 @@ export default function ProjectChallengeCard() {
       };
 
       setReview(reviewData);
+      await saveProjectAttempt(reviewData);
     }
 
     setLoadingReview(false);

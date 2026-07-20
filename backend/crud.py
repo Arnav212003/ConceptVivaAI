@@ -209,11 +209,36 @@ def get_project_challenge_by_id(db, session_id, challenge_id):
     ).first()
 
 
+def mark_project_challenge_completed(db, session_id, challenge_id):
+    """
+    Attempt save hone ke baad challenge ko COMPLETED kar dete hain,
+    warna dashboard me active_challenges count badhta hi rehta tha.
+    """
+
+    if not challenge_id:
+        return None
+
+    stored_challenge = db.query(ProjectChallenge).filter(
+        ProjectChallenge.session_id == session_id,
+        ProjectChallenge.challenge_id == challenge_id,
+    ).first()
+
+    if not stored_challenge:
+        return None
+
+    stored_challenge.status = "COMPLETED"
+    db.commit()
+    db.refresh(stored_challenge)
+
+    return stored_challenge
+
+
 def create_project_attempt(db, data):
     challenge = data.get("challenge", {})
 
     attempt = ProjectAttempt(
         session_id=data.get("session_id"),
+        challenge_id=data.get("challenge_id", ""),
         domain=data.get("domain", "Machine Learning"),
         topic=data.get("topic"),
         difficulty=data.get("difficulty", "Beginner"),
