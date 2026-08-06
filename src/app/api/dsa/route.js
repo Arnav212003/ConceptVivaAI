@@ -48,6 +48,10 @@ export async function POST(request) {
       endpoint = "/save-dsa-attempt";
     }
 
+    if (body.action === "translateHindi") {
+      endpoint = "/translate-to-hindi";
+    }
+
     const payload = { ...body };
     delete payload.action;
 

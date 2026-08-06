@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Editor from "@monaco-editor/react";
 import {
@@ -16,10 +16,20 @@ export default function DSAPracticeCard() {
   const [solution, setSolution] = useState("");
   const [runResult, setRunResult] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  const [viewedSolutionOnly, setViewedSolutionOnly] = useState(false);
   const [loadingProblem, setLoadingProblem] = useState(false);
   const [loadingRun, setLoadingRun] = useState(false);
   const [loadingFeedback, setLoadingFeedback] = useState(false);
+  const [loadingSolution, setLoadingSolution] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [loadingTranslation, setLoadingTranslation] = useState(false);
+  const [voiceLanguage, setVoiceLanguage] = useState("en");
+  const [hindiText, setHindiText] = useState("");
   const [activeTab, setActiveTab] = useState("code");
+
+  // used to stop the chunk-by-chunk speech chain when the user hits Stop,
+  // otherwise the queued chunks keep playing after cancel()
+  const stopRequestedRef = useRef(false);
 
   const limitedExecutionTopics = [
     "Linked List",
@@ -28,6 +38,16 @@ export default function DSAPracticeCard() {
     "Graphs",
     "Dynamic Programming",
   ];
+
+  // otherwise the voice keeps talking even after you leave the page
+  useEffect(() => {
+    return () => {
+      stopRequestedRef.current = true;
+      if (typeof window !== "undefined") {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   function isLimitedExecutionTopic() {
     return limitedExecutionTopics.includes(topic);
@@ -129,7 +149,14 @@ export default function DSAPracticeCard() {
     setSolution("");
     setRunResult(null);
     setFeedback(null);
+    setViewedSolutionOnly(false);
+    setHindiText("");
     setActiveTab("code");
+    stopRequestedRef.current = true;
+    if (typeof window !== "undefined") {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
   }
 
   function handleTopicChange(value) {
@@ -242,6 +269,8 @@ export default function DSAPracticeCard() {
 
     setLoadingFeedback(true);
     setFeedback(null);
+    setViewedSolutionOnly(false);
+    setHindiText("");
 
     try {
       const response = await apiFetchWithSessionRetry("/api/dsa", {
@@ -298,6 +327,185 @@ export default function DSAPracticeCard() {
     }
 
     setLoadingFeedback(false);
+  }
+
+  // reuses the evaluate endpoint since it already returns the solution,
+  // just skip saveDsaAttempt so peeking at the answer doesn't count as a real try
+  async function showSolution() {
+    if (!problem.trim()) {
+      alert("Please generate a problem first.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "This will reveal the solution and explanation. Your current code won't be scored or saved as an attempt. Continue?"
+    );
+
+    if (!confirmed) return;
+
+    setLoadingSolution(true);
+    setFeedback(null);
+    setViewedSolutionOnly(true);
+    setHindiText("");
+
+    try {
+      const response = await apiFetchWithSessionRetry("/api/dsa", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "evaluate",
+          topic,
+          difficulty,
+          problem,
+          solution: solution.trim() || getStarterCode(),
+        }),
+      });
+
+      const data = await response.json();
+
+      const resultData = {
+        score: data.score ?? 0,
+        feedback: data.feedback || "",
+        optimized_approach:
+          data.optimized_approach || "No optimized approach received.",
+        optimized_code: data.optimized_code || "Optimized code not available.",
+        explanation: data.explanation || "Explanation not available.",
+        time_complexity: data.time_complexity || "N/A",
+        space_complexity: data.space_complexity || "N/A",
+        test_cases: Array.isArray(data.test_cases) ? data.test_cases : [],
+      };
+
+      setFeedback(resultData);
+      setActiveTab("result");
+
+      // auto-play right away in whatever language is currently selected,
+      // since clicking "stuck" means they want it explained, not just shown
+      setTimeout(
+        () =>
+          speakText(
+            resultData.optimized_approach,
+            resultData.explanation,
+            voiceLanguage
+          ),
+        300
+      );
+    } catch (error) {
+      setFeedback({
+        score: 0,
+        feedback: "",
+        optimized_approach: "Something went wrong while fetching the solution.",
+        optimized_code: "Not available.",
+        explanation: "Not available.",
+        time_complexity: "N/A",
+        space_complexity: "N/A",
+        test_cases: [],
+      });
+      setActiveTab("result");
+    }
+
+    setLoadingSolution(false);
+  }
+
+  // splits text into sentence-sized chunks. Chrome has a long-standing bug
+  // where speechSynthesis cuts off long utterances after just a few words,
+  // so speaking short chunks back-to-back avoids triggering it.
+  function splitIntoSpeechChunks(text) {
+    return text
+      .split(/(?<=[.!?।])\s+/)
+      .map((chunk) => chunk.trim())
+      .filter(Boolean);
+  }
+
+  function speakChunksSequentially(chunks, lang, index) {
+    if (stopRequestedRef.current || index >= chunks.length) {
+      setIsSpeaking(false);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(chunks[index]);
+    utterance.lang = lang === "hi" ? "hi-IN" : "en-US";
+    utterance.rate = lang === "hi" ? 0.9 : 0.95;
+
+    utterance.onstart = () => setIsSpeaking(true);
+
+    utterance.onend = () => {
+      speakChunksSequentially(chunks, lang, index + 1);
+    };
+
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  // core speak function: translates to Hindi first if needed, then speaks
+  // the full text in short chunks so Chrome doesn't cut it off early.
+  // Falls back to English text if the translation call fails.
+  async function speakText(approach, explanation, lang) {
+    if (typeof window === "undefined") return;
+
+    stopRequestedRef.current = false;
+    window.speechSynthesis.cancel();
+
+    let textToSpeak = `${approach}. ${explanation}`;
+
+    if (lang === "hi") {
+      if (hindiText) {
+        textToSpeak = hindiText;
+      } else {
+        setLoadingTranslation(true);
+
+        try {
+          const combined = `${approach}\n\n${explanation}`;
+          const response = await apiFetchWithSessionRetry("/api/dsa", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              action: "translateHindi",
+              text: combined,
+            }),
+          });
+
+          const data = await response.json();
+          textToSpeak = data.translated_text || textToSpeak;
+          setHindiText(textToSpeak);
+        } catch (error) {
+          // keep the English fallback text already set above
+        }
+
+        setLoadingTranslation(false);
+      }
+    }
+
+    if (stopRequestedRef.current) return;
+
+    const chunks = splitIntoSpeechChunks(textToSpeak);
+    speakChunksSequentially(chunks, lang, 0);
+  }
+
+  function speakSolution() {
+    if (!feedback) return;
+    speakText(feedback.optimized_approach, feedback.explanation, voiceLanguage);
+  }
+
+  function stopSpeaking() {
+    stopRequestedRef.current = true;
+    if (typeof window !== "undefined") {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
+  }
+
+  function switchVoiceLanguage(lang) {
+    if (isSpeaking) {
+      stopSpeaking();
+    }
+    setVoiceLanguage(lang);
   }
 
   function getDifficultyColor(value = difficulty) {
@@ -559,6 +767,76 @@ export default function DSAPracticeCard() {
     );
   }
 
+  function renderLanguageToggle() {
+    return (
+      <div className="flex gap-2">
+        <button
+          onClick={() => switchVoiceLanguage("en")}
+          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+            voiceLanguage === "en"
+              ? "bg-indigo-500 text-white"
+              : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+          }`}
+        >
+          English
+        </button>
+
+        <button
+          onClick={() => switchVoiceLanguage("hi")}
+          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+            voiceLanguage === "hi"
+              ? "bg-indigo-500 text-white"
+              : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+          }`}
+        >
+          हिंदी
+        </button>
+      </div>
+    );
+  }
+
+  function renderVoiceButton(large = false) {
+    if (loadingTranslation) {
+      return (
+        <button
+          disabled
+          className={`flex items-center gap-2 rounded-xl bg-indigo-950/60 font-semibold text-indigo-300 ${
+            large ? "px-6 py-4 text-base" : "px-3 py-1.5 text-xs"
+          }`}
+        >
+          {large ? "Translating to Hindi..." : "Translating..."}
+        </button>
+      );
+    }
+
+    if (isSpeaking) {
+      return (
+        <button
+          onClick={stopSpeaking}
+          className={`flex items-center gap-2 rounded-xl bg-red-600 font-semibold text-white transition hover:bg-red-700 ${
+            large ? "px-6 py-4 text-base" : "px-3 py-1.5 text-xs"
+          }`}
+        >
+          ⏹ {large ? "Stop AI Explanation" : "Stop"}
+        </button>
+      );
+    }
+
+    return (
+      <button
+        onClick={speakSolution}
+        className={`flex items-center gap-2 rounded-xl bg-indigo-500 font-semibold text-white transition hover:bg-indigo-600 ${
+          large ? "px-6 py-4 text-base" : "px-3 py-1.5 text-xs"
+        }`}
+      >
+        🔊{" "}
+        {large
+          ? "Have AI Explain This Out Loud"
+          : "Explain via Voice"}
+      </button>
+    );
+  }
+
   return (
     <div className="mt-10 w-full max-w-6xl rounded-3xl border border-slate-700 bg-slate-950/70 p-4 shadow-2xl">
       <div className="mb-5 border-b border-slate-800 pb-5">
@@ -579,7 +857,8 @@ export default function DSAPracticeCard() {
 
         <p className="mt-1 text-base text-slate-400">
           Select topic and difficulty, generate one question, and submit for
-          AI evaluation.
+          AI evaluation. Stuck? Reveal the solution and have the AI explain
+          it out loud in English or Hindi.
         </p>
       </div>
 
@@ -799,7 +1078,7 @@ export default function DSAPracticeCard() {
               <div className="mt-4 flex flex-wrap gap-3">
                 <button
                   onClick={runCode}
-                  disabled={loadingRun || loadingFeedback || !problem}
+                  disabled={loadingRun || loadingFeedback || loadingSolution || !problem}
                   className="rounded-xl bg-slate-700 px-6 py-3 text-base font-semibold text-white transition hover:bg-slate-600 disabled:opacity-60"
                 >
                   {loadingRun ? "Running..." : "▶ Run Code"}
@@ -807,7 +1086,7 @@ export default function DSAPracticeCard() {
 
                 <button
                   onClick={evaluateSolution}
-                  disabled={loadingFeedback || loadingRun || !problem}
+                  disabled={loadingFeedback || loadingRun || loadingSolution || !problem}
                   className="rounded-xl bg-emerald-500 px-6 py-3 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:opacity-60"
                 >
                   {loadingFeedback ? "Submitting..." : "Submit"}
@@ -819,6 +1098,16 @@ export default function DSAPracticeCard() {
                   className="rounded-xl border border-slate-700 bg-transparent px-6 py-3 text-base font-semibold text-slate-300 transition hover:bg-slate-800 disabled:opacity-60"
                 >
                   Reset to Starter Code
+                </button>
+
+                <button
+                  onClick={showSolution}
+                  disabled={loadingSolution || loadingRun || loadingFeedback || !problem}
+                  className="ml-auto rounded-xl border border-amber-400/40 bg-amber-950/20 px-6 py-3 text-base font-semibold text-amber-300 transition hover:bg-amber-950/40 disabled:opacity-60"
+                >
+                  {loadingSolution
+                    ? "Loading..."
+                    : "🔓 Stuck? Show & Explain Solution"}
                 </button>
               </div>
             </div>
@@ -865,36 +1154,65 @@ export default function DSAPracticeCard() {
             <div className="max-h-[600px] overflow-y-auto p-5">
               {feedback ? (
                 <div>
-                  {renderResultBanner(feedback.test_cases)}
+                  {viewedSolutionOnly && (
+                    <div className="mb-5 rounded-2xl border border-indigo-400/40 bg-indigo-950/30 p-5">
+                      <div className="flex flex-col items-center gap-3 text-center">
+                        <p className="text-base font-semibold text-indigo-200">
+                          Here's the solution — want the AI to walk you
+                          through it out loud?
+                        </p>
+                        {renderLanguageToggle()}
+                        {renderVoiceButton(true)}
+                        <p className="text-xs text-slate-400">
+                          This wasn't recorded as a scored attempt.
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
-                  <div className="mb-5 rounded-2xl border border-emerald-400/30 bg-emerald-950/30 p-5">
-                    <p className="text-sm text-slate-400">Score</p>
+                  {!viewedSolutionOnly && (
+                    <>
+                      {renderResultBanner(feedback.test_cases)}
 
-                    <p className="mt-1 text-4xl font-bold text-white">
-                      {feedback.score}/10
-                    </p>
-                  </div>
+                      <div className="mb-5 rounded-2xl border border-emerald-400/30 bg-emerald-950/30 p-5">
+                        <p className="text-sm text-slate-400">Score</p>
 
-                  <div className="mb-5 rounded-2xl border border-slate-700 bg-slate-950/50 p-5">
-                    <h4 className="mb-3 text-base font-semibold text-white">
-                      Test Cases
-                    </h4>
-                    {renderTestCaseList(feedback.test_cases)}
-                  </div>
+                        <p className="mt-1 text-4xl font-bold text-white">
+                          {feedback.score}/10
+                        </p>
+                      </div>
 
-                  <div className="mb-5 rounded-2xl border border-slate-700 bg-slate-950/50 p-5">
-                    <h4 className="mb-2 text-base font-semibold text-white">
-                      Feedback
-                    </h4>
-                    <p className="whitespace-pre-line text-sm leading-7 text-slate-200">
-                      {feedback.feedback}
-                    </p>
-                  </div>
+                      <div className="mb-5 rounded-2xl border border-slate-700 bg-slate-950/50 p-5">
+                        <h4 className="mb-3 text-base font-semibold text-white">
+                          Test Cases
+                        </h4>
+                        {renderTestCaseList(feedback.test_cases)}
+                      </div>
+
+                      <div className="mb-5 rounded-2xl border border-slate-700 bg-slate-950/50 p-5">
+                        <h4 className="mb-2 text-base font-semibold text-white">
+                          Feedback
+                        </h4>
+                        <p className="whitespace-pre-line text-sm leading-7 text-slate-200">
+                          {feedback.feedback}
+                        </p>
+                      </div>
+                    </>
+                  )}
 
                   <div className="mb-5 rounded-2xl border border-indigo-400/30 bg-indigo-950/30 p-5">
-                    <h4 className="mb-2 text-base font-semibold text-indigo-200">
-                      Optimized Approach
-                    </h4>
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                      <h4 className="text-base font-semibold text-indigo-200">
+                        Optimized Approach
+                      </h4>
+
+                      {!viewedSolutionOnly && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {renderLanguageToggle()}
+                          {renderVoiceButton(false)}
+                        </div>
+                      )}
+                    </div>
                     <p className="whitespace-pre-line text-sm leading-7 text-slate-200">
                       {feedback.optimized_approach}
                     </p>
@@ -942,8 +1260,9 @@ export default function DSAPracticeCard() {
                       No result yet
                     </p>
                     <p className="mt-2 text-sm text-slate-400">
-                      Write your solution and click Submit for full AI
-                      evaluation and to save this attempt.
+                      Write your solution and click Submit, or use "Stuck?
+                      Show & Explain Solution" and the AI will read it out to
+                      you in English or Hindi.
                     </p>
                   </div>
                 </div>
@@ -964,6 +1283,3 @@ export default function DSAPracticeCard() {
     </div>
   );
 }
-
-
-

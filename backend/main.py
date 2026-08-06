@@ -77,8 +77,8 @@ except Exception:
         return None
 
 
-# the old relative path "../.env.local" depended on the current working
-# directory, so switched to an absolute Path-based load like security.py
+# relative path "../.env.local" depended on the current working directory,
+# so switched to an absolute Path-based load like security.py
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
 
@@ -392,7 +392,6 @@ def get_default_starter_code():
 def get_fallback_problem_json(question):
     # returns the same JSON shape even when Gemini is unavailable or fails,
     # so the frontend never has to handle a different response format
-
     title = question.get("title", "DSA Problem")
 
     return {
@@ -419,7 +418,6 @@ def generate_dsa_problem_json_from_gemini(question):
     # earlier this returned plain text which just looked like one big blob
     # on the frontend, so now it returns JSON and the UI can render proper
     # sections (title, examples, constraints, etc.)
-
     title = question.get("title", "DSA Problem")
     topic = question.get("topic", "DSA")
     difficulty = question.get("difficulty", "Medium")
@@ -518,7 +516,6 @@ def build_problem_text_from_json(problem_json):
     # needed for the evaluation flow, since the frontend sends back the
     # problem text when evaluating, and the backend extracts the Question ID
     # from that text
-
     lines = []
 
     lines.append(f"Question ID: {problem_json.get('question_id', '')}")
@@ -2322,7 +2319,7 @@ def save_project_attempt(
         }
     )
 
-    # once the attempt is saved, mark the challenge as completed,
+    # attempt save ho gaya to challenge ko complete mark kar dete hain,
     # otherwise the dashboard's active challenge count keeps growing forever
     if request.challenge_id:
         mark_project_challenge_completed(
@@ -2381,3 +2378,43 @@ def history(
             for item in history_data["voice_interview"]
         ],
     }
+
+
+class TranslateRequest(BaseModel):
+    text: str
+
+
+def translate_to_hindi_with_gemini(text):
+    if not GEMINI_API_KEY or not client:
+        return text  # no API available, just speak the English text as-is
+
+    prompt = f"""
+Translate the following DSA explanation into simple, clear Hindi (Devanagari script).
+Keep technical/programming terms (array, function, loop, index, pointer, etc.) in English
+since that's how Indian students normally read them — translate only the surrounding
+explanation into Hindi.
+
+Text to translate:
+{text}
+
+Return only the Hindi translation, nothing else.
+"""
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
+        return response.text.strip()
+    except Exception:
+        return text  # fall back to English if translation fails
+
+
+@app.post("/translate-to-hindi")
+def translate_to_hindi(
+    request: TranslateRequest,
+    session_id: str = Depends(get_current_session_id),
+):
+    translated = translate_to_hindi_with_gemini(request.text)
+    return {"translated_text": translated}
+
