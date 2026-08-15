@@ -3,10 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import Editor from "@monaco-editor/react";
-import {
-  apiFetchWithSessionRetry,
-  ensureConceptVivaSession,
-} from "@/utils/session";
+import { apiFetchWithSessionRetry } from "@/utils/session";
 
 export default function DSAMockCard() {
   const [topic, setTopic] = useState("Arrays");
@@ -62,31 +59,7 @@ export default function DSAMockCard() {
       console.error("Local history update failed:", error);
     }
 
-    try {
-      const session = await ensureConceptVivaSession();
 
-      await apiFetchWithSessionRetry("/api/dsa", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "save",
-          session_id: session.sessionId,
-          mode: "Mock Interview",
-          topic: attempt.topic,
-          difficulty: attempt.difficulty,
-          problem_name: attempt.problemName,
-          problem,
-          solution,
-          score: resultData.score ?? 0,
-          status: attempt.status,
-          feedback: resultData.feedback || "",
-        }),
-      });
-    } catch (error) {
-      console.error("DSA attempt backend save failed:", error);
-    }
   }
 
   function resetWorkspace() {
@@ -156,6 +129,7 @@ export default function DSAMockCard() {
         },
         body: JSON.stringify({
           action: "generateFromQuestion",
+          question_id: question.id || "",
           title: question.title || "DSA Problem",
           topic: question.topic || topic,
           difficulty: question.difficulty || "Medium",
@@ -247,6 +221,8 @@ export default function DSAMockCard() {
           difficulty: selectedMockQuestion?.difficulty || "Medium",
           problem,
           solution,
+          mode: "Mock Interview",
+          save_attempt: true,
         }),
       });
 

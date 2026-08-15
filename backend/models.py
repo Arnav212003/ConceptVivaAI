@@ -62,6 +62,11 @@ class DSAAttempt(Base):
     score = Column(Float, default=0)
     status = Column(String(100), default="Needs Improvement")
     feedback = Column(Text, default="")
+    # "verified" = hidden-test scored (curated bank + code execution enabled),
+    # "ai_generated" = AI-review scored (AI Practice topic, or hidden tests
+    # unavailable). Lets the dashboard report these separately instead of
+    # averaging a deterministic score together with an AI-review score.
+    tier = Column(String(30), default="ai_generated")
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -108,6 +113,17 @@ class ProjectAttempt(Base):
     missing_points = Column(Text, default="")
     improved_approach = Column(Text, default="")
     next_steps = Column(Text, default="")
+
+    # Full-project-source review data (JSON-encoded text). Without these,
+    # the file-by-file review Gemini generates would only exist in the
+    # immediate API response and be lost the moment the student refreshes
+    # the page or opens History/Dashboard.
+    architecture_review = Column(Text, default="")
+    file_findings = Column(Text, default="[]")
+    bugs = Column(Text, default="[]")
+    security_issues = Column(Text, default="[]")
+    missing_requirements = Column(Text, default="[]")
+    files_reviewed = Column(Integer, default=0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

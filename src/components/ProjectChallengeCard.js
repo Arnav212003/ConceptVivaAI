@@ -1,10 +1,32 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  apiFetchWithSessionRetry,
-  ensureConceptVivaSession,
-} from "@/utils/session";
+import { apiFetchWithSessionRetry } from "@/utils/session";
+
+const MAX_PROJECT_SOURCE_CHARS = 2_200_000;
+const MAX_PROJECT_FILES = 250;
+const MAX_SINGLE_FILE_BYTES = 300_000;
+
+const IGNORED_PROJECT_DIRS = new Set([
+  "node_modules", ".git", ".next", "dist", "build", "coverage",
+  "venv", ".venv", "env", "__pycache__", ".idea", ".vscode",
+  "target", "out", ".pytest_cache", ".mypy_cache",
+]);
+
+const SOURCE_EXTENSIONS = new Set([
+  ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".cpp", ".cc", ".c",
+  ".h", ".hpp", ".cs", ".go", ".rs", ".php", ".rb", ".swift", ".kt",
+  ".kts", ".scala", ".sql", ".html", ".css", ".scss", ".sass", ".less",
+  ".vue", ".svelte", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+  ".conf", ".xml", ".md", ".txt", ".sh", ".bash", ".ps1", ".bat",
+  ".gradle", ".properties", ".graphql", ".gql", ".proto", ".env.example",
+]);
+
+const SOURCE_FILENAMES = new Set([
+  "dockerfile", "makefile", "procfile", "requirements.txt", "package.json",
+  "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "pyproject.toml",
+  "poetry.lock", "pom.xml", "build.gradle", "settings.gradle", "readme.md",
+]);
 
 export default function ProjectChallengeCard() {
   const [domain, setDomain] = useState("Machine Learning");
@@ -12,7 +34,9 @@ export default function ProjectChallengeCard() {
   const [difficulty, setDifficulty] = useState("Beginner");
   const [challenge, setChallenge] = useState(null);
   const [challengeId, setChallengeId] = useState("");
-  const [submission, setSubmission] = useState("");
+  const [projectFiles, setProjectFiles] = useState([]);
+  const [projectFileInfo, setProjectFileInfo] = useState(null);
+  const [projectFileError, setProjectFileError] = useState("");
   const [review, setReview] = useState(null);
   const [loadingChallenge, setLoadingChallenge] = useState(false);
   const [loadingReview, setLoadingReview] = useState(false);
@@ -94,35 +118,7 @@ export default function ProjectChallengeCard() {
       JSON.stringify(updated)
     );
 
-    try {
-      const session = await ensureConceptVivaSession();
 
-      await apiFetchWithSessionRetry("/api/project", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "save",
-          session_id: session.sessionId,
-          challenge_id: challengeId,
-          domain,
-          topic: getChallengeTopicForDisplay(),
-          difficulty,
-          project_title: getChallengeTitle(),
-          challenge: challenge || {},
-          submission,
-          score: reviewData.score ?? 0,
-          verdict: reviewData.verdict || "PARTIAL",
-          feedback: reviewData.feedback || "",
-          missing_points: reviewData.missing_points || "",
-          improved_approach: reviewData.improved_approach || "",
-          next_steps: reviewData.next_steps || "",
-        }),
-      });
-    } catch (error) {
-      console.error("Project attempt backend save failed:", error);
-    }
   }
 
   function clearHistory() {
@@ -133,7 +129,9 @@ export default function ProjectChallengeCard() {
   function resetChallenge() {
     setChallenge(null);
     setChallengeId("");
-    setSubmission("");
+    setProjectFiles([]);
+    setProjectFileInfo(null);
+    setProjectFileError("");
     setReview(null);
   }
 
@@ -148,7 +146,11 @@ export default function ProjectChallengeCard() {
               return (
                 <li key={index}>
                   {Object.entries(item)
-                    .map(([key, val]) => `${key}: ${val}`)
+                    .map(([key, val]) =>
+                      `${key}: ${
+                        typeof val === "object" ? JSON.stringify(val) : val
+                      }`
+                    )
                     .join(" | ")}
                 </li>
               );
@@ -165,6 +167,76 @@ export default function ProjectChallengeCard() {
         {value}
       </p>
     );
+  }
+
+
+  function isReadableProjectFile(file) {
+    const relativePath = file.webkitRelativePath || file.name;
+    const parts = relativePath.split("/").map((part) => part.toLowerCase());
+
+    if (parts.some((part) => IGNORED_PROJECT_DIRS.has(part))) {
+      return false;
+    }
+
+    const lowerName = file.name.toLowerCase();
+    if (lowerName === ".env" || lowerName.startsWith(".env.")) {
+      return lowerName === ".env.example";
+    }
+
+    if (SOURCE_FILENAMES.has(lowerName)) return true;
+
+    const dotIndex = lowerName.lastIndexOf(".");
+    const extension = dotIndex >= 0 ? lowerName.slice(dotIndex) : "";
+    return SOURCE_EXTENSIONS.has(extension);
+  }
+
+  async function handleProjectFolder(event) {
+    const selected = Array.from(event.target.files || []);
+    setProjectFiles([]);
+    setProjectFileInfo(null);
+    setProjectFileError("");
+    setReview(null);
+
+    if (!selected.length) return;
+
+    const readable = selected
+      .filter(isReadableProjectFile)
+      .filter((file) => file.size <= MAX_SINGLE_FILE_BYTES)
+      .slice(0, MAX_PROJECT_FILES);
+
+    if (!readable.length) {
+      setProjectFileError(
+        "No readable source files found. Select the project source folder, not a build/dependency folder."
+      );
+      return;
+    }
+
+    const loaded = [];
+    let totalChars = 0;
+
+    for (const file of readable) {
+      const content = await file.text();
+      if (totalChars + content.length > MAX_PROJECT_SOURCE_CHARS) {
+        setProjectFileError(
+          "Project source is too large for one AI review. Remove generated/data files and keep the complete application source under 2.2M characters."
+        );
+        setProjectFiles([]);
+        return;
+      }
+
+      loaded.push({
+        path: file.webkitRelativePath || file.name,
+        content,
+      });
+      totalChars += content.length;
+    }
+
+    setProjectFiles(loaded);
+    setProjectFileInfo({
+      files: loaded.length,
+      totalChars,
+      skipped: selected.length - loaded.length,
+    });
   }
 
   async function generateChallenge() {
@@ -230,8 +302,8 @@ export default function ProjectChallengeCard() {
       return;
     }
 
-    if (!submission.trim()) {
-      alert("Please write your approach/code/report first.");
+    if (projectFiles.length === 0) {
+      alert("Please select your complete project source folder first.");
       return;
     }
 
@@ -250,11 +322,16 @@ export default function ProjectChallengeCard() {
           domain,
           topic: getChallengeTopicForDisplay(),
           difficulty,
-          submission,
+          files: projectFiles,
+          project_notes: "Full source-folder submission",
         }),
       });
 
       const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || data.error || "Project review failed.");
+      }
 
       const reviewData = {
         score: data.score ?? 0,
@@ -265,6 +342,13 @@ export default function ProjectChallengeCard() {
           data.improved_approach || "Improved approach not available.",
         next_steps: data.next_steps || "Next steps not available.",
         suggested_resources: data.suggested_resources || [],
+        architecture_review:
+          data.architecture_review || "Architecture review not available.",
+        file_findings: data.file_findings || [],
+        bugs: data.bugs || [],
+        security_issues: data.security_issues || [],
+        missing_requirements: data.missing_requirements || [],
+        files_reviewed: data.files_reviewed ?? projectFiles.length,
       };
 
       setReview(reviewData);
@@ -282,6 +366,12 @@ export default function ProjectChallengeCard() {
         improved_approach: "Check backend project endpoint.",
         next_steps: "Fix API route and try again.",
         suggested_resources: [],
+        architecture_review: "Could not review architecture.",
+        file_findings: [],
+        bugs: [],
+        security_issues: [],
+        missing_requirements: [],
+        files_reviewed: 0,
       };
 
       setReview(reviewData);
@@ -467,34 +557,70 @@ export default function ProjectChallengeCard() {
 
           <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5">
             <h3 className="text-xl font-bold text-white">
-              Submit Your Project Approach
+              Submit Full Project Source Code
             </h3>
 
             <p className="mt-1 text-sm text-slate-400">
-              Paste your approach, Python code, model steps, evaluation result,
-              architecture design, API plan, schema, or explanation here.
+              Select your complete project folder. ConceptVivaAI reads the
+              source files together so Gemini can review architecture,
+              cross-file logic, bugs, missing requirements, and security issues.
             </p>
 
-            <textarea
-              value={submission}
-              onChange={(event) => setSubmission(event.target.value)}
-              className="mt-4 min-h-[420px] w-full rounded-xl border border-slate-700 bg-slate-950/60 p-4 font-mono text-sm leading-7 text-white outline-none"
-              placeholder={`Example:
-1. I will define requirements.
-2. I will design APIs or model pipeline.
-3. I will design database schema or dataset flow.
-4. I will explain evaluation, scalability, and bottlenecks.
-5. I will mention trade-offs and next improvements.
+            <div className="mt-4 rounded-2xl border border-dashed border-emerald-400/40 bg-emerald-950/10 p-5">
+              <label className="block text-sm font-semibold text-emerald-200">
+                Full Project Folder
+              </label>
+              <input
+                type="file"
+                multiple
+                webkitdirectory=""
+                directory=""
+                onChange={handleProjectFolder}
+                className="mt-3 block w-full text-sm text-slate-300 file:mr-4 file:rounded-lg file:border-0 file:bg-emerald-500 file:px-4 file:py-2 file:font-semibold file:text-white hover:file:bg-emerald-600"
+              />
+              <p className="mt-3 text-xs leading-5 text-slate-400">
+                Dependencies/build output such as node_modules, .git, .next,
+                venv, dist and binary files are ignored automatically. Secret
+                .env files are never included.
+              </p>
 
-Paste your code, report, or design approach here...`}
-            />
+              {projectFileInfo && (
+                <div className="mt-4 rounded-xl border border-emerald-400/30 bg-slate-950/50 p-3 text-sm text-emerald-100">
+                  Ready for full review: <strong>{projectFileInfo.files}</strong>{" "}
+                  source files · {projectFileInfo.totalChars.toLocaleString()}
+                  {" "}characters
+                  {projectFileInfo.skipped > 0
+                    ? ` · ${projectFileInfo.skipped} dependency/binary/large files skipped`
+                    : ""}
+                </div>
+              )}
+
+              {projectFileError && (
+                <p className="mt-4 rounded-xl border border-red-400/30 bg-red-950/20 p-3 text-sm text-red-200">
+                  {projectFileError}
+                </p>
+              )}
+            </div>
+
+            {projectFiles.length > 0 && (
+              <div className="mt-4 max-h-48 overflow-y-auto rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Included source files
+                </p>
+                {projectFiles.map((file) => (
+                  <p key={file.path} className="truncate py-1 font-mono text-xs text-slate-300">
+                    {file.path}
+                  </p>
+                ))}
+              </div>
+            )}
 
             <button
               onClick={evaluateSubmission}
-              disabled={loadingReview || !challengeId}
+              disabled={loadingReview || !challengeId || projectFiles.length === 0}
               className="mt-4 rounded-xl bg-pink-500 px-6 py-3 text-base font-semibold text-white transition hover:bg-pink-600 disabled:opacity-60"
             >
-              {loadingReview ? "Reviewing..." : "Submit for AI Review"}
+              {loadingReview ? "Reviewing Full Project..." : "Submit Full Project for AI Review"}
             </button>
 
             {review && (
@@ -520,6 +646,47 @@ Paste your code, report, or design approach here...`}
                     <p className="font-semibold text-emerald-300">Feedback</p>
                     {renderList(review.feedback)}
                   </section>
+
+                  <section className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+                    <p className="font-semibold text-blue-300">
+                      Architecture Review
+                    </p>
+                    {renderList(review.architecture_review)}
+                  </section>
+
+                  {review.bugs?.length > 0 && (
+                    <section className="rounded-xl border border-red-400/30 bg-red-950/10 p-4">
+                      <p className="font-semibold text-red-300">Code Bugs</p>
+                      {renderList(review.bugs)}
+                    </section>
+                  )}
+
+                  {review.file_findings?.length > 0 && (
+                    <section className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+                      <p className="font-semibold text-violet-300">
+                        File-by-file Findings ({review.files_reviewed} reviewed)
+                      </p>
+                      {renderList(review.file_findings)}
+                    </section>
+                  )}
+
+                  {review.security_issues?.length > 0 && (
+                    <section className="rounded-xl border border-orange-400/30 bg-orange-950/10 p-4">
+                      <p className="font-semibold text-orange-300">
+                        Security Findings
+                      </p>
+                      {renderList(review.security_issues)}
+                    </section>
+                  )}
+
+                  {review.missing_requirements?.length > 0 && (
+                    <section className="rounded-xl border border-yellow-400/30 bg-yellow-950/10 p-4">
+                      <p className="font-semibold text-yellow-300">
+                        Missing Project Requirements
+                      </p>
+                      {renderList(review.missing_requirements)}
+                    </section>
+                  )}
 
                   <section className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
                     <p className="font-semibold text-yellow-300">

@@ -1,10 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  apiFetchWithSessionRetry,
-  ensureConceptVivaSession,
-} from "@/utils/session";
+import { apiFetchWithSessionRetry } from "@/utils/session";
 
 export default function MLPracticeCard() {
   const [topic, setTopic] = useState("");
@@ -97,32 +94,7 @@ Do not reveal the answer.
       JSON.stringify(updated)
     );
 
-    try {
-      const session = await ensureConceptVivaSession();
 
-      await apiFetchWithSessionRetry("/api/interview", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "save",
-          session_id: session.sessionId,
-          topic: activeTopic,
-          level,
-          question,
-          answer,
-          score: resultData.score ?? 0,
-          verdict: resultData.verdict || "PARTIAL",
-          feedback: resultData.feedback || "",
-          missing_points: resultData.missing_points || "",
-          corrected_answer: resultData.corrected_answer || "",
-          improvement: resultData.improvement || "",
-        }),
-      });
-    } catch (error) {
-      console.error("ML practice backend save failed:", error);
-    }
   }
 
   function clearHistory() {
@@ -200,6 +172,9 @@ Do not reveal the answer.
           level,
           question,
           answer,
+          mode: "practice",
+          display_topic: activeTopic,
+          save_attempt: true,
         }),
       });
 

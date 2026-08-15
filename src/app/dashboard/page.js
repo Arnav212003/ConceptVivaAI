@@ -84,7 +84,7 @@ function OverviewCard({ label, value, subtext }) {
   );
 }
 
-function ModuleCard({ title, total, average, description }) {
+function ModuleCard({ title, total, average, description, tierBreakdown }) {
   const readiness = Math.round(Number(average || 0) * 10);
   const tone = getScoreTone(Number(average || 0));
 
@@ -120,6 +120,34 @@ function ModuleCard({ title, total, average, description }) {
           </p>
         </div>
       </div>
+
+      {tierBreakdown && (
+        <div className="mt-3 grid grid-cols-2 gap-4">
+          <div className="rounded-xl border border-emerald-800/60 bg-emerald-950/20 p-4">
+            <p className="text-xs font-semibold text-emerald-300">
+              ✅ Verified ({tierBreakdown.verified.total_attempts})
+            </p>
+            <p className="mt-1 text-lg font-bold text-white">
+              {Number(tierBreakdown.verified.average_score || 0).toFixed(1)}/10
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Hidden-test scored
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-indigo-800/60 bg-indigo-950/20 p-4">
+            <p className="text-xs font-semibold text-indigo-300">
+              🤖 AI Generated ({tierBreakdown.ai_generated.total_attempts})
+            </p>
+            <p className="mt-1 text-lg font-bold text-white">
+              {Number(tierBreakdown.ai_generated.average_score || 0).toFixed(1)}/10
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              AI-reviewed scoring
+            </p>
+          </div>
+        </div>
+      )}
 
       <ProgressBar value={readiness} />
 
@@ -202,10 +230,16 @@ export default function DashboardPage() {
     loadDashboard();
   }, []);
 
-  const mlPractice = history?.ml_practice || [];
-  const dsaPractice = history?.dsa_practice || [];
-  const projectChallenge = history?.project_challenge || [];
-  const voiceInterview = history?.voice_interview || [];
+  const mlPractice = useMemo(() => history?.ml_practice || [], [history]);
+  const dsaPractice = useMemo(() => history?.dsa_practice || [], [history]);
+  const projectChallenge = useMemo(
+    () => history?.project_challenge || [],
+    [history]
+  );
+  const voiceInterview = useMemo(
+    () => history?.voice_interview || [],
+    [history]
+  );
 
   const mlTotal = stats?.ml_practice?.total_attempts ?? mlPractice.length ?? 0;
   const dsaTotal =
@@ -421,6 +455,14 @@ export default function DashboardPage() {
             total={dsaTotal}
             average={dsaAverage}
             description="LeetCode-style practice, AI review, optimized approach, complexity, and test feedback."
+            tierBreakdown={
+              stats?.dsa_practice?.verified && stats?.dsa_practice?.ai_generated
+                ? {
+                    verified: stats.dsa_practice.verified,
+                    ai_generated: stats.dsa_practice.ai_generated,
+                  }
+                : null
+            }
           />
 
           <ModuleCard

@@ -1,4 +1,4 @@
-import DSAMockCard from "@/components/DSAMOCKCard.JS";
+import DSAMockCard from "@/components/DSAMockCard.js";
 
 export default function DSAMockPage() {
   return (

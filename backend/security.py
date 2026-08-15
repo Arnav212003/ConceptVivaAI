@@ -1,5 +1,7 @@
+import base64
 import hashlib
 import hmac
+import json
 import os
 import secrets
 import time
@@ -77,7 +79,11 @@ def verify_session_token(session_id: str, session_token: str) -> bool:
 
     current_time = int(time.time())
 
+    # Reject expired tokens and tokens issued implausibly far in the future.
     if current_time - issued_at > SESSION_TTL_SECONDS:
+        return False
+
+    if issued_at - current_time > 300:
         return False
 
     message = f"{session_id}.{issued_at}"
@@ -159,3 +165,79 @@ def get_current_session_id(
         )
 
     return x_session_id
+
+EVALUATION_RECEIPT_TTL_SECONDS = int(
+    os.getenv("EVALUATION_RECEIPT_TTL_SECONDS", str(60 * 60 * 6))
+)
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode((value + padding).encode("ascii"))
+
+
+def create_evaluation_receipt(
+    session_id: str,
+    kind: str,
+    score: float,
+    verdict: str = "",
+    metadata: Optional[dict] = None,
+) -> str:
+    """Create a signed, short-lived receipt for a server-generated score.
+
+    The frontend can store the receipt, but it cannot modify the score without
+    invalidating the HMAC. Interview reports use these receipts so the backend,
+    not the browser, calculates the final average.
+    """
+    payload = {
+        "sid": session_id,
+        "kind": kind,
+        "score": max(0.0, min(10.0, float(score))),
+        "verdict": str(verdict or ""),
+        "iat": int(time.time()),
+        "meta": metadata or {},
+    }
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    body = _b64url_encode(raw)
+    signature = _sign_message(f"evaluation.{body}")
+    return f"{body}.{signature}"
+
+
+def verify_evaluation_receipt(
+    session_id: str,
+    receipt: str,
+    expected_kind: Optional[str] = None,
+) -> Optional[dict]:
+    if not session_id or not receipt:
+        return None
+
+    try:
+        body, received_signature = receipt.rsplit(".", 1)
+        expected_signature = _sign_message(f"evaluation.{body}")
+        if not hmac.compare_digest(expected_signature, received_signature):
+            return None
+
+        payload = json.loads(_b64url_decode(body).decode("utf-8"))
+        if payload.get("sid") != session_id:
+            return None
+        if expected_kind and payload.get("kind") != expected_kind:
+            return None
+
+        issued_at = int(payload.get("iat", 0))
+        now = int(time.time())
+        if now - issued_at > EVALUATION_RECEIPT_TTL_SECONDS:
+            return None
+        if issued_at - now > 300:
+            return None
+
+        score = float(payload.get("score", 0))
+        if score < 0 or score > 10:
+            return None
+        payload["score"] = score
+        return payload
+    except Exception:
+        return None

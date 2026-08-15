@@ -161,6 +161,7 @@ def create_dsa_attempt(db, data):
         score=data.get("score", 0),
         status=data.get("status", "Needs Improvement"),
         feedback=data.get("feedback", ""),
+        tier=data.get("tier", "ai_generated"),
     )
 
     db.add(attempt)
@@ -251,6 +252,12 @@ def create_project_attempt(db, data):
         missing_points=data.get("missing_points", ""),
         improved_approach=data.get("improved_approach", ""),
         next_steps=data.get("next_steps", ""),
+        architecture_review=data.get("architecture_review", ""),
+        file_findings=_normalize_json_for_db(data.get("file_findings", [])),
+        bugs=_normalize_json_for_db(data.get("bugs", [])),
+        security_issues=_normalize_json_for_db(data.get("security_issues", [])),
+        missing_requirements=_normalize_json_for_db(data.get("missing_requirements", [])),
+        files_reviewed=data.get("files_reviewed", 0),
     )
 
     db.add(attempt)
@@ -290,6 +297,29 @@ def get_dashboard_stats(db, session_id):
         DSAAttempt.session_id == session_id
     ).scalar() or 0
 
+    # Tier is never blended: a 9/10 hidden-test-verified score and a 9/10
+    # AI-review score are not the same signal, so the dashboard reports them
+    # as separate buckets instead of one combined average.
+    dsa_verified_count = db.query(DSAAttempt).filter(
+        DSAAttempt.session_id == session_id,
+        DSAAttempt.tier == "verified",
+    ).count()
+
+    dsa_verified_avg = db.query(func.avg(DSAAttempt.score)).filter(
+        DSAAttempt.session_id == session_id,
+        DSAAttempt.tier == "verified",
+    ).scalar() or 0
+
+    dsa_ai_count = db.query(DSAAttempt).filter(
+        DSAAttempt.session_id == session_id,
+        DSAAttempt.tier == "ai_generated",
+    ).count()
+
+    dsa_ai_avg = db.query(func.avg(DSAAttempt.score)).filter(
+        DSAAttempt.session_id == session_id,
+        DSAAttempt.tier == "ai_generated",
+    ).scalar() or 0
+
     project_avg = db.query(func.avg(ProjectAttempt.score)).filter(
         ProjectAttempt.session_id == session_id
     ).scalar() or 0
@@ -307,6 +337,14 @@ def get_dashboard_stats(db, session_id):
         "dsa_practice": {
             "total_attempts": dsa_count,
             "average_score": round(float(dsa_avg), 1),
+            "verified": {
+                "total_attempts": dsa_verified_count,
+                "average_score": round(float(dsa_verified_avg), 1),
+            },
+            "ai_generated": {
+                "total_attempts": dsa_ai_count,
+                "average_score": round(float(dsa_ai_avg), 1),
+            },
         },
         "project_challenge": {
             "total_attempts": project_count,

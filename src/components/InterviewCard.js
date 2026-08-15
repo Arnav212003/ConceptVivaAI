@@ -23,6 +23,8 @@ export default function InterviewCard() {
   const [interviewScores, setInterviewScores] = useState([]);
   const [interviewHistory, setInterviewHistory] = useState([]);
   const [finalReport, setFinalReport] = useState(null);
+  const [revisionQueue, setRevisionQueue] = useState([]);
+  const [followUpUsed, setFollowUpUsed] = useState(false);
 
   const recognitionRef = useRef(null);
   const keepListeningRef = useRef(false);
@@ -34,6 +36,15 @@ export default function InterviewCard() {
 
     if (savedHistory) {
       setInterviewHistory(JSON.parse(savedHistory));
+    }
+
+    const savedRevision = localStorage.getItem("conceptviva_interview_revision");
+    if (savedRevision) {
+      try {
+        setRevisionQueue(JSON.parse(savedRevision));
+      } catch (error) {
+        setRevisionQueue([]);
+      }
     }
   }, []);
 
@@ -72,9 +83,16 @@ export default function InterviewCard() {
       return cleanTopic;
     }
 
+    const revisionText = revisionQueue.length
+      ? `\nStart by prioritizing these revision items from previous weak answers:\n${revisionQueue
+          .slice(0, 5)
+          .map((item, index) => `${index + 1}. ${item.topic}: ${item.question}`)
+          .join("\n")}\n`
+      : "";
+
     return `
 AI mock interview practice.
-
+${revisionText}
 The user did not select a fixed topic.
 Choose one useful interview topic yourself from:
 - Machine Learning basics
@@ -249,8 +267,29 @@ Do not reveal the answer.
     setRound(0);
     setInterviewScores([]);
     setFinalReport(null);
+    setFollowUpUsed(false);
     setAutoMode(false);
     setActiveTopic(getTopicForDisplay());
+  }
+
+  function addRevisionItem(item) {
+    setRevisionQueue((current) => {
+      const key = `${item.topic}|${item.question}`;
+      const withoutDuplicate = current.filter(
+        (entry) => `${entry.topic}|${entry.question}` !== key
+      );
+      const updated = [item, ...withoutDuplicate].slice(0, 20);
+      localStorage.setItem(
+        "conceptviva_interview_revision",
+        JSON.stringify(updated)
+      );
+      return updated;
+    });
+  }
+
+  function clearRevisionQueue() {
+    setRevisionQueue([]);
+    localStorage.removeItem("conceptviva_interview_revision");
   }
 
   function getAverageScore(scores) {
@@ -341,6 +380,9 @@ Do not reveal the answer.
           strong_points: report.strongPoints,
           weak_points: report.weakPoints,
           recommendation: report.recommendation,
+          evaluation_receipts: scores
+            .map((item) => item.evaluationReceipt)
+            .filter(Boolean),
         }),
       });
     } catch (error) {
@@ -449,6 +491,8 @@ Do not reveal the answer.
           level,
           question,
           answer,
+          mode: "interview",
+          display_topic: activeTopic,
         }),
       });
 
@@ -456,11 +500,15 @@ Do not reveal the answer.
 
       const evaluation = {
         score: data.score ?? 0,
+        verdict: data.verdict || "PARTIAL",
         feedback: data.feedback || "No feedback received.",
+        missing_points: data.missing_points || "",
+        corrected_answer: data.corrected_answer || "",
         improvement: data.improvement || "Improve answer structure.",
         follow_up_question:
           data.follow_up_question ||
           `Can you explain one practical use case of ${activeTopic}?`,
+        evaluationReceipt: data.evaluation_receipt || "",
       };
 
       setResult(evaluation);
@@ -472,6 +520,8 @@ Do not reveal the answer.
           score: Number(evaluation.score || 0),
           question,
           answer,
+          verdict: evaluation.verdict,
+          evaluationReceipt: evaluation.evaluationReceipt,
         },
       ];
 
@@ -479,19 +529,38 @@ Do not reveal the answer.
 
       const shortFeedback = `Your score is ${evaluation.score} out of 10. ${evaluation.improvement}`;
 
+      if (evaluation.verdict === "WEAK") {
+        addRevisionItem({
+          topic: activeTopic || getTopicForDisplay(),
+          question: question.slice(0, 300),
+        });
+      }
+
       speakText(shortFeedback, () => {
-        if (autoMode) {
-          if (updatedScores.length >= maxRounds) {
-            saveInterviewReport(updatedScores);
-            setAutoMode(false);
-          } else {
-            generateQuestion(evaluation.follow_up_question);
-          }
+        if (!autoMode) return;
+
+        if (updatedScores.length >= maxRounds) {
+          saveInterviewReport(updatedScores);
+          setAutoMode(false);
+          return;
         }
+
+        if (evaluation.verdict === "PARTIAL" && !followUpUsed) {
+          setFollowUpUsed(true);
+          generateQuestion(evaluation.follow_up_question);
+          return;
+        }
+
+        // STRONG moves on immediately. WEAK is added to revision and moves on.
+        // A second PARTIAL after its one follow-up also moves on.
+        setFollowUpUsed(false);
+        generateQuestion();
       });
     } catch (error) {
       const evaluation = {
         score: 5,
+        verdict: "WEAK",
+        evaluationReceipt: "",
         feedback: "Something went wrong while evaluating your answer.",
         improvement: "Check backend and API route connection.",
         follow_up_question: `Can you explain ${activeTopic} with an example?`,
@@ -506,6 +575,8 @@ Do not reveal the answer.
           score: Number(evaluation.score || 0),
           question,
           answer,
+          verdict: evaluation.verdict,
+          evaluationReceipt: evaluation.evaluationReceipt,
         },
       ];
 
@@ -624,6 +695,33 @@ Do not reveal the answer.
           </p>
         </div>
       </div>
+
+      {revisionQueue.length > 0 && (
+        <div className="mb-5 rounded-2xl border border-amber-500/30 bg-amber-950/20 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold text-amber-200">Revision Queue</p>
+              <p className="mt-1 text-sm text-slate-400">
+                Weak answers are prioritized in the next AI-selected interview.
+              </p>
+            </div>
+            <button
+              onClick={clearRevisionQueue}
+              className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+            >
+              Clear
+            </button>
+          </div>
+          <ul className="mt-3 space-y-2 text-sm text-slate-300">
+            {revisionQueue.slice(0, 3).map((item, index) => (
+              <li key={`${item.topic}-${index}`} className="line-clamp-2">
+                <span className="font-semibold text-amber-200">{item.topic}:</span>{" "}
+                {item.question}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="mb-5 grid gap-4 md:grid-cols-2">
         <div>
