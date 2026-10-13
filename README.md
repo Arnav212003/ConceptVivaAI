@@ -12,7 +12,7 @@ The project is still evolving, but the current version supports AI-based practic
 - Supports a DSA mock set with mixed difficulty questions.
 - Includes a voice interview mode using browser speech recognition and speech synthesis.
 - Generates project challenges and reviews submitted source folders.
-- Tracks saved attempts in a SQLite database and shows progress on a dashboard.
+- Tracks saved attempts in SQLite locally, with PostgreSQL support for deployment.
 - Uses signed session tokens so each browser session has its own history without a login page.
 
 ## Why I Built It
@@ -42,7 +42,9 @@ This is not meant to be a big-company product. It is a student portfolio project
 
 - FastAPI
 - SQLAlchemy
-- SQLite
+- SQLite for local development
+- PostgreSQL support for deployment
+- Alembic migrations
 - Pydantic
 - Google Gemini API
 - HMAC-signed session tokens
@@ -95,6 +97,8 @@ backend/
   config.py               Environment variable loading
   database.py             SQLAlchemy engine and session setup
   models.py               Database tables
+  alembic/                Database migrations
+  alembic.ini             Alembic configuration
   schemas.py              Pydantic request models
   crud.py                 Database helper functions
   security.py             Session tokens, logout, and score receipts
@@ -131,6 +135,12 @@ SESSION_TTL_SECONDS=2592000
 DATABASE_URL=sqlite:///./conceptviva.db
 FRONTEND_URL=http://localhost:3000
 
+# Local SQLite:
+# DATABASE_URL=sqlite:///./conceptviva.db
+
+# Production PostgreSQL:
+# DATABASE_URL=postgresql+psycopg2://username:password@host:5432/database_name
+
 # Keep false unless you are running code in a trusted sandbox.
 ENABLE_CODE_EXECUTION=false
 
@@ -148,6 +158,7 @@ py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-dev.txt
+alembic upgrade head
 uvicorn main:app --reload --port 8000
 ```
 
@@ -202,6 +213,42 @@ cd backend
 python -m pytest
 ```
 
+## Database and Migrations
+
+For local development, SQLite is still the simplest option:
+
+```env
+DATABASE_URL=sqlite:///./conceptviva.db
+```
+
+For deployment, use PostgreSQL through `DATABASE_URL`:
+
+```env
+DATABASE_URL=postgresql+psycopg2://username:password@host:5432/database_name
+```
+
+The backend also accepts plain `postgresql://...` URLs and normalizes them for the `psycopg2` driver.
+
+Alembic is now included for database schema changes:
+
+```powershell
+cd backend
+alembic revision --autogenerate -m "message"
+alembic upgrade head
+```
+
+`Base.metadata.create_all(bind=engine)` is still kept as a small SQLite-only local fallback, so first-time users do not get stuck if they run the backend before learning migrations. For a deployed PostgreSQL backend, run `alembic upgrade head` before starting the app.
+
+If you already have an old local SQLite database created before Alembic, either back it up and delete the local `.db` file for a fresh start, or run `alembic stamp head` after confirming the tables already match the models.
+
+## Deployment Database Note
+
+SQLite is useful for local learning, but it is not a good choice for deployed data on platforms with ephemeral filesystems. On Render and similar platforms, local SQLite files can be lost after redeploys or restarts.
+
+For deployment, use PostgreSQL. Render Free Postgres is useful for demos, but it expires after 30 days. For a longer-running deployment, use paid Render Postgres or an external PostgreSQL provider such as Supabase, Neon, Railway, or Aiven.
+
+This does not make the project a full production SaaS. It simply makes the student portfolio project easier to deploy and closer to real backend practice.
+
 ## Security Improvements Already Added
 
 - Session IDs and tokens are signed with HMAC.
@@ -217,12 +264,13 @@ python -m pytest
 
 - Gemini feedback is useful for practice, but it is still AI-based feedback and may not always be perfect.
 - SQLite is fine for this project stage. For a deployed multi-user version, PostgreSQL would be better.
+- Alembic migrations should be used for deployed database changes.
 - The local DSA runner is for supported curated questions and should only be enabled in a trusted sandbox.
 - Session tokens are currently stored in browser local storage. A more secure deployed version should use HttpOnly cookies.
 
 ## Future Improvements
 
-- Add Alembic migrations for database changes.
+- Expand Alembic migration coverage as the schema changes.
 - Move DSA code execution to a real sandbox or external judge service.
 - Use cookie-based sessions instead of local storage tokens.
 - Add more FastAPI integration tests for routes, auth, dashboard, and project flow.
@@ -232,4 +280,4 @@ python -m pytest
 
 ## Current Status
 
-This project is built to be understandable and explainable in interviews. The architecture is intentionally simple: Next.js handles the UI and API proxy routes, FastAPI handles backend logic, SQLite stores attempts, and Gemini powers question generation and feedback.
+This project is built to be understandable and explainable in interviews. The architecture is intentionally simple: Next.js handles the UI and API proxy routes, FastAPI handles backend logic, SQLite/PostgreSQL stores attempts, and Gemini powers question generation and feedback.

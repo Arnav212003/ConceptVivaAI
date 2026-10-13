@@ -1,9 +1,4 @@
-"""Curated DSA question bank used by ConceptVivaAI.
-
-Each UI topic intentionally contains 10 questions with a 3 Easy / 4 Medium /
-3 Hard split so a 10-question mixed mock can always honor that distribution.
-Runner metadata is server-only and is stripped from API responses.
-"""
+"""Curated DSA question bank."""
 
 from __future__ import annotations
 
@@ -57,10 +52,9 @@ def _q(
     }
 
 
-# Test-case values below are deliberately small. They are hidden from the UI and
-# are meant to catch logic errors, not to replace a full online judge.
+# Small hidden tests for basic logic checks.
 DSA_QUESTION_BANK = [
-    # ------------------------------------------------------------------ Arrays
+    # Arrays
     _q("arr_001", "Two Sum", "Arrays", "Easy", "Hash Map", "twoSum", "nums, target", [
         {"args": [[2, 7, 11, 15], 9], "expected": [0, 1]},
         {"args": [[3, 2, 4], 6], "expected": [1, 2]},
@@ -112,7 +106,7 @@ DSA_QUESTION_BANK = [
         {"args": [[9, 11], 2], "expected": [11]},
     ]),
 
-    # ---------------------------------------------------------------- Strings
+    # Strings
     _q("str_001", "Valid Palindrome", "Strings", "Easy", "Two Pointers", "isPalindrome", "s", [
         {"args": ["A man, a plan, a canal: Panama"], "expected": True},
         {"args": ["race a car"], "expected": False},
@@ -164,7 +158,7 @@ DSA_QUESTION_BANK = [
         {"args": ["efe"], "expected": [["e", "f", "e"], ["efe"]]},
     ], compare="unordered_outer"),
 
-    # ------------------------------------------------------------ Linked List
+    # Linked List
     _q("ll_001", "Reverse Linked List", "Linked List", "Easy", "Pointer Reversal", "reverseList", "head", [
         {"args": [[1, 2, 3, 4, 5]], "expected": [5, 4, 3, 2, 1]},
         {"args": [[1, 2]], "expected": [2, 1]},
@@ -216,7 +210,7 @@ DSA_QUESTION_BANK = [
         {"args": [[]], "expected": []},
     ], arg_types=["listnode"], return_type="listnode"),
 
-    # ------------------------------------------------------------------ Stack
+    # Stack
     _q("stk_001", "Valid Parentheses", "Stack", "Easy", "Stack", "isValid", "s", [
         {"args": ["()"], "expected": True},
         {"args": ["()[]{}"], "expected": True},
@@ -268,7 +262,7 @@ DSA_QUESTION_BANK = [
         {"args": ["(1+(4+5+2)-3)+(6+8)"], "expected": 23},
     ]),
 
-    # ------------------------------------------------------------------ Queue
+    # Queue
     _q("que_001", "Generate Binary Numbers from 1 to N", "Queue", "Easy", "BFS Queue", "generateBinary", "n", [
         {"args": [5], "expected": ["1", "10", "11", "100", "101"]},
         {"args": [1], "expected": ["1"]},
@@ -320,7 +314,7 @@ DSA_QUESTION_BANK = [
         {"args": [[10, -2, -10, -5, 20], 2], "expected": 23},
     ]),
 
-    # ---------------------------------------------------------- Binary Search
+    # Binary Search
     _q("bs_001", "Binary Search", "Binary Search", "Easy", "Binary Search", "search", "nums, target", [
         {"args": [[-1, 0, 3, 5, 9, 12], 9], "expected": 4},
         {"args": [[-1, 0, 3, 5, 9, 12], 2], "expected": -1},
@@ -372,7 +366,7 @@ DSA_QUESTION_BANK = [
         {"args": [[1, 2], 2], "expected": 1},
     ], source="SPOJ / GFG / Curated"),
 
-    # ------------------------------------------------------------------ Trees
+    # Trees
     _q("tr_001", "Maximum Depth of Binary Tree", "Trees", "Easy", "DFS / BFS", "maxDepth", "root", [
         {"args": [[3, 9, 20, None, None, 15, 7]], "expected": 3},
         {"args": [[1, None, 2]], "expected": 2},
@@ -424,7 +418,7 @@ DSA_QUESTION_BANK = [
         {"args": [[2, 1, 3]], "expected": [2, 1, 3]},
     ], arg_types=["tree"], return_type="tree", mutate_index=0),
 
-    # ----------------------------------------------------------------- Graphs
+    # Graphs
     _q("gr_001", "BFS Traversal of Graph", "Graphs", "Easy", "Breadth First Search", "bfsOfGraph", "V, adj", [
         {"args": [5, [[1, 2, 3], [0], [0, 4], [0], [2]]], "expected": [0, 1, 2, 3, 4]},
         {"args": [3, [[1], [0, 2], [1]]], "expected": [0, 1, 2]},
@@ -476,7 +470,7 @@ DSA_QUESTION_BANK = [
         {"args": [3, [[0,1,100],[1,2,100],[0,2,500]], 0, 2, 0], "expected": 500},
     ]),
 
-    # ------------------------------------------------------- Dynamic Programming
+    # Dynamic Programming
     _q("dp_001", "Climbing Stairs", "Dynamic Programming", "Easy", "1D DP", "climbStairs", "n", [
         {"args": [2], "expected": 2},
         {"args": [3], "expected": 3},

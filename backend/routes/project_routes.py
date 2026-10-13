@@ -103,10 +103,7 @@ def evaluate_project_submission(
         )
     )
 
-    # Persist the actual submitted source (not just a filename manifest) so
-    # it can be reviewed again later from History. Fall back to the manifest
-    # only in the unlikely case the bundle comes back empty despite files
-    # being present.
+    # Store source when possible; fallback to a file manifest.
     if project_files:
         stored_submission = build_full_source_bundle(project_files) or build_project_submission_manifest(
             project_files, request.project_notes
