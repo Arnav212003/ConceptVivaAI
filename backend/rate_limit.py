@@ -1,8 +1,4 @@
-"""Tiny dependency-free in-memory rate limiter.
-
-Suitable for a single-process demo deployment. For horizontally scaled
-production, replace the storage with Redis while keeping the same call sites.
-"""
+"""Small in-memory rate limiter for demo use."""
 
 from __future__ import annotations
 
@@ -47,8 +43,7 @@ SESSION_STARTS_PER_MINUTE = int(os.getenv("SESSION_STARTS_PER_MINUTE", "20"))
 
 
 def _client_ip(request: Request) -> str:
-    # Only trust the socket peer here. If deployed behind a trusted reverse
-    # proxy, normalize forwarded headers at the proxy layer instead.
+    # Trust only the direct socket peer.
     return request.client.host if request.client else "unknown"
 
 

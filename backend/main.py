@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import FRONTEND_URL
-from database import Base, engine
+from database import Base, DATABASE_URL, engine
 
 from routes.dashboard_routes import router as dashboard_router
 from routes.dsa_routes import router as dsa_router
@@ -18,7 +18,9 @@ from services.dsa_service import run_python_tests  # noqa: F401
 
 app = FastAPI(title="ConceptVivaAI Backend")
 
-Base.metadata.create_all(bind=engine)
+# SQLite fallback for first-time local runs.
+if DATABASE_URL.startswith("sqlite"):
+    Base.metadata.create_all(bind=engine)
 
 app.add_middleware(
     CORSMiddleware,
