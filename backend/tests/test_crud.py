@@ -1,18 +1,6 @@
-"""
-Tests for the small pure-logic helper functions in crud.py.
-
-These don't touch the database - just the JSON normalization and
-pagination logic, which is where the actual bugs tend to hide
-(double-encoded JSON from the frontend, bad limit/offset query params).
-"""
+"""Tests for pure helper functions in crud.py."""
 
 import json
-import sys
-import os
-
-# so this can be run as `pytest tests/test_crud.py` from the backend folder
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from crud import _normalize_json_for_db, decode_project_challenge, _safe_limit_offset
 
 
@@ -22,8 +10,7 @@ def test_normalize_json_handles_dict():
 
 
 def test_normalize_json_handles_double_encoded_string():
-    # this is the case that caused corrupted rows in the DB before the fix -
-    # the frontend can send a JSON string that was already stringified once
+    # Frontend can send already-stringified JSON.
     double_encoded = json.dumps(json.dumps({"a": 1}))
     result = _normalize_json_for_db(double_encoded)
     assert json.loads(result) == {"a": 1}

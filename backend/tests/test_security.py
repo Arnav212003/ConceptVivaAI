@@ -3,15 +3,6 @@ Tests for the session token signing/verification logic in security.py.
 Doesn't touch the database - just the HMAC signing itself.
 """
 
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-# security.py raises at import time if this isn't set, so make sure a
-# value exists before importing it in a test environment
-os.environ.setdefault("SESSION_SECRET_KEY", "test_secret_key_for_unit_tests_only")
-
 from security import create_session_credentials, verify_session_token
 
 

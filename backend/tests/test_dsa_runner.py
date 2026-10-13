@@ -5,18 +5,16 @@ bare Python identifiers in the generated script and crashed with
 NameError. This locks in the fix (payload passed in as a JSON string
 and parsed with json.loads inside the runner).
 
-Uses run_python_tests directly, with ENABLE_CODE_EXECUTION forced on
-for the duration of the test.
+Uses the local runner directly with execution enabled for the test call.
 """
 
-import os
-import sys
+from dsa_runner import run_question_tests
+from services.dsa_bank import get_dsa_question_by_title
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-os.environ["ENABLE_CODE_EXECUTION"] = "true"
-
-import main
+def run_topic_test(title, solution):
+    question = get_dsa_question_by_title(title)
+    return run_question_tests(question, solution, enabled=True)
 
 
 def test_runner_handles_boolean_test_cases_for_strings_topic():
@@ -27,7 +25,7 @@ def test_runner_handles_boolean_test_cases_for_strings_topic():
         "        return cleaned == cleaned[::-1]"
     )
 
-    result = main.run_python_tests("Strings", solution)
+    result = run_topic_test("Valid Palindrome", solution)
 
     assert result["supported"] is True
     assert result["all_passed"] is True
@@ -42,7 +40,7 @@ def test_runner_reports_failure_for_wrong_solution():
         "        return False"
     )
 
-    result = main.run_python_tests("Strings", solution)
+    result = run_topic_test("Valid Palindrome", solution)
 
     assert result["supported"] is True
     assert result["all_passed"] is False
@@ -61,7 +59,7 @@ def test_runner_handles_arrays_topic_with_list_equality():
         "        return []"
     )
 
-    result = main.run_python_tests("Arrays", solution)
+    result = run_topic_test("Two Sum", solution)
 
     assert result["supported"] is True
     assert result["all_passed"] is True
