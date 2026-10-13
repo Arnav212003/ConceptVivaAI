@@ -9,15 +9,28 @@ build/
 !.env.example
 
 backend/venv/
+backend/.venv/
+backend/env/
 venv/
+.venv/
+env/
 __pycache__/
 *.pyc
+.ruff_cache/
+.mypy_cache/
 
 .DS_Store
 .vscode/
 
 .pytest_cache/
+htmlcov/
+.coverage
 
 # Local SQLite database
 *.db
 backend/*.db
+*.sqlite
+*.sqlite3
+
+# Logs and local runtime output
+*.log

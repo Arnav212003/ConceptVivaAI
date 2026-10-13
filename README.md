@@ -1,124 +1,235 @@
-# ConceptVivaAI - Topic-wise AI Mock Interview Platform
+# ConceptVivaAI
 
-ConceptVivaAI is a full-stack platform for practicing technical interviews and coding problems with AI-generated feedback. It covers topic-wise ML interview practice, a two-tier DSA practice system, project/hackathon-style challenges, and a voice-based mock interview mode.
+ConceptVivaAI is my full-stack practice platform for technical interview preparation. I built it to practice topic-wise interviews while learning ML, DSA, system design basics, FastAPI, Next.js, and AI API integration.
 
-## Features
+The project is still evolving, but the current version supports AI-based practice, DSA coding practice, voice interview rounds, project challenge reviews, dashboard tracking, and session handling.
 
-- **ML Topic Practice** - AI generates topic-wise interview questions (or picks a topic automatically), evaluates answers semantically, and gives feedback with a corrected answer and follow-up question.
-- **Voice Mock Interview** - AI speaks the question out loud, listens to a spoken answer using the browser's speech recognition, evaluates it, and asks a natural follow-up. Ends with a final performance report (strong points, weak points, recommendation).
-- **DSA Coding Practice — Two-Tier system:**
-  - **Verified Bank** - 90 curated LeetCode-style questions (exactly 3 Easy / 4 Medium / 3 Hard per topic, across 9 topics), each with hidden test cases. When `ENABLE_CODE_EXECUTION=true`, submissions run against those hidden tests for deterministic scoring.
-  - **AI Practice** - the student types any topic (e.g. "Segment Trees", "Tries"), and Gemini generates a fresh question on demand with its own proper method signature. Scored by AI review, not hidden tests, since there's no fixed answer key.
-  - Every generated question and every evaluation response carries an explicit `tier` (`verified` / `ai_generated`), and the dashboard reports the two separately instead of averaging a hidden-test score together with an AI-review score.
-- **DSA Mock Set** - 10-question mixed mock set (3 Easy / 4 Medium / 3 Hard) pulled from the curated bank.
-- **Project Challenge Mode — Full Source Submission** - AI generates a hackathon-style project challenge (problem statement, dataset schema, tasks, evaluation metrics, hints) across Machine Learning, Data Analytics, DSA, and System Design domains. The student selects their complete project folder (not just a text description); the backend does a real cross-file code review — architecture, concrete bugs with file/severity, security issues, and missing requirements — and persists the full review (and the actual submitted source) so it's still there after a refresh or in History, not just in the one-time response.
-- **Dashboard** - Tracks attempts, average scores, and topic-wise readiness across all four modes, pulling data from the backend database. DSA stats are further split by tier (Verified vs AI Generated).
-- **Session-based auth** - No login required; each browser gets a signed session token used to scope saved attempts.
+## What It Does
+
+- Generates ML and interview questions based on a selected topic or an AI-selected topic.
+- Evaluates answers using Gemini and gives feedback, missing points, corrected answers, and follow-up questions.
+- Provides DSA practice with a curated question bank and AI-generated practice questions.
+- Supports a DSA mock set with mixed difficulty questions.
+- Includes a voice interview mode using browser speech recognition and speech synthesis.
+- Generates project challenges and reviews submitted source folders.
+- Tracks saved attempts in a SQLite database and shows progress on a dashboard.
+- Uses signed session tokens so each browser session has its own history without a login page.
+
+## Why I Built It
+
+I wanted one project that connects multiple things I am learning as a BTech CSE student:
+
+- backend APIs with FastAPI
+- frontend development with Next.js and React
+- database models with SQLAlchemy
+- AI integration with Gemini
+- basic security improvements such as signed sessions and server-side score handling
+- practical interview-preparation workflows
+
+This is not meant to be a big-company product. It is a student portfolio project with real features, simple architecture, and enough production-style thinking to discuss in interviews.
 
 ## Tech Stack
 
-**Backend**
-- FastAPI (Python), layered as routes → services → models (no business logic in route handlers)
-- SQLAlchemy + SQLite (swappable via `DATABASE_URL`)
-- Google Gemini API (`gemini-2.5-flash`) for question generation and evaluation
-- HMAC-signed session tokens
-
 **Frontend**
-- Next.js (App Router)
+
+- Next.js App Router
 - React
 - Tailwind CSS
-- Monaco Editor (for the DSA code editor)
-- Web Speech API (speech recognition + speech synthesis) for the voice interview mode
+- Monaco Editor for the DSA code editor
+- Web Speech API for voice interview mode
 
-## Project Structure
+**Backend**
 
-```
+- FastAPI
+- SQLAlchemy
+- SQLite
+- Pydantic
+- Google Gemini API
+- HMAC-signed session tokens
+
+## Main Features
+
+### ML Practice
+
+- Topic-wise AI-generated questions
+- Answer evaluation with score, feedback, missing points, and corrected answer
+- Optional AI-selected topic when the user leaves the topic blank
+- Saved practice attempts shown on the dashboard
+
+### DSA Practice
+
+- Curated DSA question bank
+- AI practice mode for custom topics like Segment Trees, Tries, or Graphs
+- Monaco-based Python editor
+- AI feedback with optimized approach, explanation, and complexity
+- Tier tracking for verified-bank questions vs AI-generated questions
+
+### Voice Interview
+
+- Browser speech recognition for spoken answers
+- AI-generated interview questions and follow-ups
+- Round-wise scoring
+- Final report with strong points, weak points, and recommendation
+- Signed evaluation receipts so final reports are based on backend-generated scores
+
+### Project Challenge
+
+- AI-generated mini project challenges
+- Full source-folder submission from the browser
+- Backend review for architecture, bugs, missing requirements, and security issues
+- Project attempts saved to database history
+
+### Dashboard
+
+- Total attempts across ML, DSA, project, and voice interview modes
+- Average score tracking
+- Topic-wise readiness
+- Recent activity history
+- DSA stats split by verified and AI-generated tiers
+
+## Folder Structure
+
+```text
 backend/
-  main.py            Thin FastAPI entrypoint: app setup, CORS, router registration
-  config.py          Env loading and constants (GEMINI_API_KEY, ENABLE_CODE_EXECUTION, ...)
-  schemas.py         Pydantic request models for every route
-  serializers.py      ORM row -> JSON response converters
-  utils.py            Small stateless helpers (extract_json, format_datetime, ...)
-  models.py           SQLAlchemy models
-  crud.py             Database helper functions + dashboard stats (tier-split for DSA)
-  database.py         DB engine/session setup
-  security.py         Session creation, verification, revocation
-  dsa_runner.py        Local hidden-test judge for curated DSA questions
-  rate_limit.py        Per-session request rate limiting
-  routes/              HTTP layer - one router per feature area
-    session_routes.py, dsa_routes.py, interview_routes.py, ml_routes.py,
-    project_routes.py, dashboard_routes.py, translate_routes.py
-  services/            Business logic / Gemini layer, called by routes
-    gemini_client.py    Single shared Gemini client (load-once)
-    dsa_bank.py          Curated question bank loader
-    dsa_service.py       DSA generation, evaluation, tier logic (both tiers)
-    interview_service.py ML/interview question generation + evaluation
-    project_service.py   Project challenge generation + evaluation
-    translate_service.py Hindi translation
-  data/
-    dsa_question.py    Curated DSA question bank (90 questions)
+  main.py                 FastAPI app setup and router registration
+  config.py               Environment variable loading
+  database.py             SQLAlchemy engine and session setup
+  models.py               Database tables
+  schemas.py              Pydantic request models
+  crud.py                 Database helper functions
+  security.py             Session tokens, logout, and score receipts
+  rate_limit.py           Simple in-memory rate limiting
+  dsa_runner.py           Local DSA runner for supported curated questions
+  routes/                 FastAPI route files
+  services/               Gemini and feature logic
+  data/                   Curated question data
+  tests/                  Backend tests
 
 src/
-  app/
-    page.js          Home page (domain selector)
-    ml/page.js        ML practice + voice interview + project challenge
-    dsa/page.js        DSA practice page
-    dashboard/page.js  Dashboard (with tier-split DSA stats)
-    api/               Next.js API routes that proxy to the FastAPI backend
-  components/          DSAPracticeCard (Two-Tier UI), InterviewCard, MLPracticeCard,
-                       ProjectChallengeCard, ResultCard, Navbar
-  utils/session.js      Session management (create/refresh/logout)
+  app/                    Next.js pages and API proxy routes
+  components/             Reusable UI components
+  utils/session.js        Frontend session helper
 ```
 
-## Setup
+## Environment Setup
 
-### 1. Backend
+The project reads backend environment variables from the root `.env.local` file. Backend-only overrides can also be placed in `backend/.env`.
 
-```bash
-cd backend
-pip install -r requirements.txt
-```
+Do not commit real API keys. Use dummy values in examples and keep real values only in local env files.
 
-Create a `.env.local` file in the `backend` folder:
+Create this file in the project root:
 
-```
-GEMINI_API_KEY=your_gemini_api_key_here
-SESSION_SECRET_KEY=some_random_secret_string
+```env
+# Frontend
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+PYTHON_BACKEND_URL=http://127.0.0.1:8000
+
+# Backend
+GEMINI_API_KEY=your_dummy_gemini_api_key
+SESSION_SECRET_KEY=replace_with_a_long_random_local_secret
 SESSION_TTL_SECONDS=2592000
 DATABASE_URL=sqlite:///./conceptviva.db
 FRONTEND_URL=http://localhost:3000
+
+# Keep false unless you are running code in a trusted sandbox.
 ENABLE_CODE_EXECUTION=false
+
+# Optional rate limits
+AI_REQUESTS_PER_MINUTE=20
+GENERAL_REQUESTS_PER_MINUTE=120
+SESSION_STARTS_PER_MINUTE=20
 ```
 
-Run the backend:
+## Run Backend on Windows PowerShell
 
-```bash
+```powershell
+cd backend
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 uvicorn main:app --reload --port 8000
 ```
 
-### 2. Frontend
+Backend URL:
 
-```bash
+```text
+http://localhost:8000
+```
+
+If PowerShell blocks virtualenv activation, run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+## Run Frontend on Windows PowerShell
+
+Open a second terminal from the project root:
+
+```powershell
 npm install
-```
-
-Create a `.env.local` file in the project root:
-
-```
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-```
-
-Run the frontend:
-
-```bash
 npm run dev
 ```
 
-The app will be available at `http://localhost:3000`.
+Frontend URL:
 
-## Notes on the Two-Tier DSA system
+```text
+http://localhost:3000
+```
 
-- **`ENABLE_CODE_EXECUTION`** controls whether submitted DSA solutions actually run against hidden tests, or are evaluated by Gemini alone. It defaults to `false` because raw subprocess execution of student-submitted Python is not a security boundary — only enable it in a trusted/sandboxed environment. When it's `false`, the frontend shows an explicit warning in Verified mode instead of silently claiming hidden-test scoring it isn't performing.
-- **`tier`** is computed server-side, never assumed by the frontend: `"verified"` only when a question resolves to a real curated-bank question *and* `ENABLE_CODE_EXECUTION` is true; otherwise `"ai_generated"`. This is stored per-attempt (`DSAAttempt.tier`) so the dashboard never averages a hidden-test score together with an AI-review score.
-- **AI Practice repeat-avoidance**: the frontend keeps the last 15 generated titles per topic (in memory, per browser session) and sends them back on the next generation call so Gemini is told not to repeat them, alongside a random variation key on every call.
-- If `GEMINI_API_KEY` is missing or the API call fails, every endpoint falls back to a canned response (or the curated bank, where relevant) instead of crashing, so the app stays usable.
+If PowerShell blocks `npm.ps1`, use:
+
+```powershell
+npm.cmd run dev
+```
+
+## Useful Checks
+
+Frontend:
+
+```powershell
+npm run lint
+npm run build
+```
+
+Backend:
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+python -m pytest
+```
+
+## Security Improvements Already Added
+
+- Session IDs and tokens are signed with HMAC.
+- Logout revokes the current session token.
+- Interview reports use signed evaluation receipts, so the browser cannot freely choose the final average.
+- Legacy save endpoints re-evaluate answers on the backend instead of trusting client-provided scores.
+- Basic request size limits are added for answers, DSA solutions, and project source files.
+- AI endpoints have simple in-memory rate limiting.
+- `.env` files, SQLite databases, virtual environments, build folders, and dependency folders are ignored by Git.
+- DSA code execution is disabled by default because raw Python subprocess execution is not a strong sandbox.
+
+## Important Notes
+
+- Gemini feedback is useful for practice, but it is still AI-based feedback and may not always be perfect.
+- SQLite is fine for this project stage. For a deployed multi-user version, PostgreSQL would be better.
+- The local DSA runner is for supported curated questions and should only be enabled in a trusted sandbox.
+- Session tokens are currently stored in browser local storage. A more secure deployed version should use HttpOnly cookies.
+
+## Future Improvements
+
+- Add Alembic migrations for database changes.
+- Move DSA code execution to a real sandbox or external judge service.
+- Use cookie-based sessions instead of local storage tokens.
+- Add more FastAPI integration tests for routes, auth, dashboard, and project flow.
+- Add stronger project-file secret scanning before storing submitted source.
+- Improve mobile UI polish and accessibility.
+- Add more curated DSA questions and topic coverage.
+
+## Current Status
+
+This project is built to be understandable and explainable in interviews. The architecture is intentionally simple: Next.js handles the UI and API proxy routes, FastAPI handles backend logic, SQLite stores attempts, and Gemini powers question generation and feedback.

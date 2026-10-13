@@ -1,9 +1,6 @@
-"""Small local DSA judge used for curated ConceptVivaAI questions.
+"""Small local DSA judge for supported curated questions.
 
-This is intentionally disabled by default in production because Python subprocess
-execution is not a security boundary. For local development it provides real
-hidden-test execution. A production deployment should replace the subprocess
-backend with a container/microVM judge while keeping this module's return shape.
+Keep this disabled unless code is running in a trusted sandbox.
 """
 
 from __future__ import annotations

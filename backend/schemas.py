@@ -1,8 +1,4 @@
-"""Pydantic request models for every route.
-
-Kept in one module (instead of scattered across route files) so the API
-contract is easy to scan in one place, similar to a DTO layer.
-"""
+"""Pydantic request models used by the FastAPI routes."""
 from pydantic import BaseModel, Field
 
 
@@ -46,15 +42,10 @@ class DSAPracticeQuestionRequest(BaseModel):
     difficulty: str = Field(default="Mixed", min_length=1, max_length=30)
 
 
-# AI Practice tier: any topic the student types, not limited to the curated
-# bank. These questions are scored via AI review only (no hidden tests), so
-# the response is always tagged tier="ai_generated" for the frontend badge.
 class AIPracticeQuestionRequest(BaseModel):
     topic: str = Field(min_length=1, max_length=200)
     difficulty: str = Field(default="Medium", min_length=1, max_length=30)
-    # Titles the client already generated for this topic in this browser
-    # session, so Gemini can be told not to repeat them. Capped to keep the
-    # prompt small; the frontend only needs to send recent ones anyway.
+    # Recent titles help reduce repeated AI-practice questions.
     recent_titles: list[str] = Field(default_factory=list, max_length=15)
 
 
@@ -66,8 +57,7 @@ class DSAOwnQuestionRequest(BaseModel):
     pattern: str = Field(default="General DSA", max_length=100)
 
 
-# Legacy save payloads are kept for API compatibility, but the backend ignores
-# client-provided scores and re-evaluates them before persisting.
+# Legacy save payloads are kept for old frontend calls.
 class SaveMLPracticeAttemptRequest(BaseModel):
     session_id: str = ""
     topic: str = Field(min_length=1, max_length=2000)
@@ -137,8 +127,7 @@ class ProjectCodeFile(BaseModel):
 
 class ProjectSubmissionRequest(BaseModel):
     challenge_id: str = Field(min_length=1, max_length=255)
-    # `submission` is kept for backwards compatibility. The current UI sends
-    # the complete readable source tree through `files`.
+    # Kept for old text-only project submissions.
     submission: str = Field(default="", max_length=50000)
     files: list[ProjectCodeFile] = Field(default_factory=list, max_length=250)
     project_notes: str = Field(default="", max_length=10000)

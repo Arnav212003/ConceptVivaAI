@@ -1,8 +1,4 @@
-"""Single shared Gemini client instance.
-
-Every service module imports `client` from here instead of constructing its
-own, so there is exactly one client for the whole backend (load-once pattern).
-"""
+"""Shared Gemini client used by the backend services."""
 try:
     from google import genai
 except Exception:

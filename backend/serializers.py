@@ -85,9 +85,6 @@ def serialize_project_attempt(item):
         "missing_points": item.missing_points,
         "improved_approach": item.improved_approach,
         "next_steps": item.next_steps,
-        # Full-project-source review data — without decoding these here, the
-        # file-by-file findings would only ever exist in the one-time
-        # evaluate-project-submission response and vanish from History/Dashboard.
         "architecture_review": item.architecture_review or "",
         "file_findings": _decode_json_field(item.file_findings, []),
         "bugs": _decode_json_field(item.bugs, []),

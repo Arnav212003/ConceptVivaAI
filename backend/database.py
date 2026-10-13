@@ -6,8 +6,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 
-# this file gets imported before main.py calls load_dotenv, so DATABASE_URL
-# from .env was never actually being picked up. loading it here directly fixes that.
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
 

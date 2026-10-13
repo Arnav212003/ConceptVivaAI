@@ -187,12 +187,7 @@ def create_evaluation_receipt(
     verdict: str = "",
     metadata: Optional[dict] = None,
 ) -> str:
-    """Create a signed, short-lived receipt for a server-generated score.
-
-    The frontend can store the receipt, but it cannot modify the score without
-    invalidating the HMAC. Interview reports use these receipts so the backend,
-    not the browser, calculates the final average.
-    """
+    """Create a signed receipt for a backend-generated score."""
     payload = {
         "sid": session_id,
         "kind": kind,

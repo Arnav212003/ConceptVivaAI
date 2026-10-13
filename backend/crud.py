@@ -36,15 +36,7 @@ def _safe_limit_offset(limit=20, offset=0):
 
 
 def _normalize_json_for_db(value):
-    """
-    Stores JSON safely as a single JSON string.
-
-    Handles:
-    - dict/list from frontend
-    - JSON string from frontend
-    - already double-encoded JSON string
-    - invalid string fallback
-    """
+    """Store dict/list/string values as one JSON string."""
 
     if value is None:
         return json.dumps({}, ensure_ascii=False)
@@ -75,10 +67,7 @@ def _normalize_json_for_db(value):
 
 
 def decode_project_challenge(value):
-    """
-    Converts stored challenge_json back to object.
-    Also fixes old double-encoded rows while reading.
-    """
+    """Convert stored challenge_json back to a Python object."""
 
     if value is None:
         return {}
@@ -211,11 +200,6 @@ def get_project_challenge_by_id(db, session_id, challenge_id):
 
 
 def mark_project_challenge_completed(db, session_id, challenge_id):
-    """
-    Attempt save hone ke baad challenge ko COMPLETED kar dete hain,
-    warna dashboard me active_challenges count badhta hi rehta tha.
-    """
-
     if not challenge_id:
         return None
 
@@ -297,9 +281,7 @@ def get_dashboard_stats(db, session_id):
         DSAAttempt.session_id == session_id
     ).scalar() or 0
 
-    # Tier is never blended: a 9/10 hidden-test-verified score and a 9/10
-    # AI-review score are not the same signal, so the dashboard reports them
-    # as separate buckets instead of one combined average.
+    # Keep verified and AI-reviewed DSA scores separate.
     dsa_verified_count = db.query(DSAAttempt).filter(
         DSAAttempt.session_id == session_id,
         DSAAttempt.tier == "verified",

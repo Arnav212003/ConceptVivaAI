@@ -1,16 +1,9 @@
-"""Centralized configuration and environment loading.
-
-Kept separate from main.py so every layer (services, routes) can import
-constants like GEMINI_API_KEY or ENABLE_CODE_EXECUTION without importing
-the FastAPI app itself (which would risk circular imports).
-"""
+"""Environment settings used by the backend."""
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# relative path "../.env.local" depended on the current working directory,
-# so we use an absolute Path-based load like security.py
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
 

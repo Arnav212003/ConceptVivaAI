@@ -1,9 +1,4 @@
-"""Business logic for DSA problem generation and evaluation.
-
-This is the "services" layer for DSA: routes call into here, this module
-calls Gemini and the local test runner, and returns plain dicts back to
-the route layer (which stays thin and only handles HTTP concerns).
-"""
+"""DSA question generation and evaluation helpers."""
 from uuid import uuid4
 
 from config import ENABLE_CODE_EXECUTION, GEMINI_API_KEY
@@ -13,11 +8,7 @@ from services.gemini_client import client
 from utils import extract_json, get_topic_key
 
 
-# Two-Tier system: the curated bank (90 questions) has hidden test cases and
-# is deterministically scored -> "verified". Anything else (free-topic AI
-# questions, or a bank-id that doesn't resolve) is AI-review scored only,
-# which is weaker/gameable -> "ai_generated". The frontend badges these
-# differently so the tier is never silently hidden from the student.
+# verified = hidden-test scored, ai_generated = AI-reviewed only.
 TIER_VERIFIED = "verified"
 TIER_AI_GENERATED = "ai_generated"
 
@@ -27,31 +18,14 @@ def get_question_tier(runner_supported):
 
 
 def is_hidden_test_available(question):
-    """True only when this exact question can actually be run through the
-    hidden-test runner right now.
-
-    A bank-sourced question is not enough by itself: ENABLE_CODE_EXECUTION
-    must also be true (it defaults to false — subprocess execution is not a
-    security boundary, see dsa_runner.py), and the question needs runner
-    metadata. Generation-time "verified" badges use this instead of assuming
-    every bank question is verified, so the badge never promises hidden-test
-    scoring the server isn't actually going to run.
-    """
+    """Return True only when this question can use the local runner."""
     return bool(ENABLE_CODE_EXECUTION and question and question.get("runner"))
 
 
 def generate_ai_practice_question(topic, difficulty, recent_titles=None):
-    """AI Practice tier: student types any topic, not limited to the 90
-    curated bank questions. Always produced via Gemini, always evaluated
-    without hidden tests, so it is always tagged ai_generated.
-
-    recent_titles (optional list of previously generated titles for this
-    session/topic) is passed to Gemini as a "do not repeat" list, and every
-    call also carries a fresh random variation key, so repeated clicks on the
-    same topic don't keep producing the same or near-identical question.
-    """
+    """Generate a custom-topic problem that will be AI-reviewed."""
     synthetic_question = {
-        "id": "",  # no bank id -> evaluate_dsa_solution will fall through to AI-only scoring
+        "id": "",
         "title": f"{topic} Practice Problem",
         "topic": topic,
         "difficulty": difficulty,
@@ -63,8 +37,7 @@ def generate_ai_practice_question(topic, difficulty, recent_titles=None):
         enforce_signature=False,
         recent_titles=recent_titles,
     )
-    # Force question_id empty so /evaluate-dsa-solution never matches it to a
-    # curated bank id by accident.
+    # Empty id keeps AI-practice questions out of the curated runner path.
     problem_json["question_id"] = ""
     return synthetic_question, problem_json
 
@@ -77,8 +50,6 @@ def get_default_starter_code():
 
 
 def get_fallback_problem_json(question):
-    # returns the same JSON shape even when Gemini is unavailable or fails,
-    # so the frontend never has to handle a different response format
     title = question.get("title", "DSA Problem")
 
     return {
@@ -101,17 +72,7 @@ def get_fallback_problem_json(question):
 
 
 def generate_dsa_problem_json_from_gemini(question, enforce_signature=True, recent_titles=None):
-    # generates a LeetCode-style structured question.
-    # earlier this returned plain text which just looked like one big blob
-    # on the frontend, so now it returns JSON and the UI can render proper
-    # sections (title, examples, constraints, etc.)
-    #
-    # enforce_signature=True (curated bank questions): the starter code is
-    # forced to the bank's exact signature, because the hidden-test runner
-    # calls that exact method name/shape.
-    # enforce_signature=False (AI Practice / custom questions with no bank
-    # signature to protect): Gemini picks its own method name matching the
-    # problem instead of every question getting the generic "def solve".
+    """Generate a structured LeetCode-style problem."""
     title = question.get("title", "DSA Problem")
     topic = question.get("topic", "DSA")
     difficulty = question.get("difficulty", "Medium")
@@ -132,7 +93,7 @@ def generate_dsa_problem_json_from_gemini(question, enforce_signature=True, rece
             "class Solution that matches this specific problem (for example "
             "def longestIncreasingSubsequence(self, nums)). Keep arguments "
             "JSON-friendly: int, float, str, list, nested list, or combinations "
-            "of these. Do NOT name the method \"solve\" — name it after what it "
+            "of these. Do NOT name the method \"solve\" - name it after what it "
             "actually does."
         )
 
@@ -204,8 +165,7 @@ Return only valid JSON in this exact format:
         if not result:
             return get_fallback_problem_json(question)
 
-        # force-set question_id because the evaluation step looks up
-        # the question in the bank using this exact id
+        # Keep the bank id stable for later evaluation.
         result["question_id"] = question_id
 
         result.setdefault("title", title)
@@ -218,13 +178,8 @@ Return only valid JSON in this exact format:
         result.setdefault("follow_up", "")
 
         if enforce_signature:
-            # Runner metadata uses an exact function signature, so never allow
-            # the model to invent a different starter signature.
             result["starter_code"] = curated_starter_code
         else:
-            # No hidden-test runner depends on this signature, so keep
-            # Gemini's own method name — but still validate the shape and
-            # fall back to a generic starter if it's malformed or missing.
             starter = str(result.get("starter_code") or "").strip()
             if (
                 not starter.startswith("class Solution:")
@@ -248,10 +203,6 @@ Return only valid JSON in this exact format:
 
 
 def build_problem_text_from_json(problem_json):
-    # builds a plain text version from the JSON.
-    # needed for the evaluation flow, since the frontend sends back the
-    # problem text when evaluating, and the backend extracts the Question ID
-    # from that text
     lines = []
 
     lines.append(f"Question ID: {problem_json.get('question_id', '')}")
@@ -316,13 +267,7 @@ def _score_from_runner(runner_result):
 
 
 def evaluate_bank_dsa_solution_with_gemini(question, problem_text, solution):
-    """Evaluate a curated question.
-
-    Hidden test execution is authoritative whenever the local runner is enabled.
-    Gemini is used for explanation/feedback, never to override a failing hidden
-    test result. When code execution is disabled, Gemini still gives a server-side
-    semantic review so the browser cannot manufacture its own score.
-    """
+    """Evaluate a curated question with the runner when available."""
     title = question.get("title", "DSA Problem")
     topic = question.get("topic", "DSA")
     difficulty = question.get("difficulty", "Medium")
@@ -413,7 +358,7 @@ Return only valid JSON:
     ai_result.setdefault("time_complexity", "N/A")
     ai_result.setdefault("space_complexity", "N/A")
 
-    # Never let AI-generated pretend tests replace actual runner output.
+    # Keep runner output separate from Gemini feedback.
     ai_result["test_cases"] = runner_result.get("test_cases", [])
     ai_result["runner_supported"] = bool(runner_result.get("supported"))
     ai_result["passed"] = int(runner_result.get("passed", 0) or 0)

@@ -52,8 +52,6 @@ def evaluate_answer(
         },
     )
 
-    # ML Practice is persisted in the same trusted backend call that creates the
-    # score, so browser-side score tampering cannot alter dashboard data.
     if request.save_attempt and mode == "practice":
         attempt = create_ml_practice_attempt(
             db,
@@ -82,8 +80,7 @@ def save_interview_report(
     session_id: str = Depends(get_current_session_id),
     db: Session = Depends(get_db),
 ):
-    # The browser no longer gets to choose its own average. Each round score must
-    # have a valid signed receipt created by /evaluate-answer for this session.
+    # Only backend-signed round scores are used for the final average.
     valid_receipts = []
     seen = set()
     for receipt in request.evaluation_receipts:

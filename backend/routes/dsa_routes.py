@@ -61,10 +61,7 @@ def dsa_question_bank_stats():
         "medium": len(get_dsa_questions_by_difficulty("Medium")),
         "hard": len(get_dsa_questions_by_difficulty("Hard")),
         "tier": TIER_VERIFIED,
-        # Bank questions only get scored via hidden tests when this is true.
-        # It defaults to false in .env.example (subprocess execution is not a
-        # security boundary), so the frontend can show the real state instead
-        # of unconditionally promising "Verified".
+        # Bank questions are hidden-test scored only when execution is enabled.
         "hidden_tests_enabled": ENABLE_CODE_EXECUTION,
         "ai_practice": {
             "tier": "ai_generated",
@@ -115,8 +112,6 @@ def generate_dsa_practice_question(
             "problem": get_fallback_dsa_problem(request.topic, request.difficulty),
             "problem_json": None,
             "starter_code": get_default_starter_code(),
-            # No bank question matched, so evaluation can never resolve to a
-            # real hidden-test runner either — this must not claim "verified".
             "tier": get_question_tier(runner_supported=False),
             "message": "No matching question found in DSA bank. Fallback problem returned.",
         }
@@ -214,10 +209,7 @@ def generate_ai_practice_question_route(
     http_request: Request,
     session_id: str = Depends(get_current_session_id),
 ):
-    """AI Practice tier: unlimited topics, not limited to the 90 curated
-    questions. Always AI-review scored (no hidden tests), so the response is
-    always tagged tier="ai_generated" for the frontend badge.
-    """
+    """Generate a free-topic DSA problem for AI-reviewed practice."""
     enforce_rate_limit(http_request, bucket="ai", session_id=session_id)
     recent_titles = [t.strip()[:150] for t in request.recent_titles if t and t.strip()][:15]
     question, problem_json = generate_ai_practice_question(
@@ -307,7 +299,7 @@ def save_dsa_attempt(
     session_id: str = Depends(get_current_session_id),
     db: Session = Depends(get_db),
 ):
-    """Legacy compatibility endpoint. Client score/status fields are ignored."""
+    """Legacy save endpoint. The backend still re-evaluates the attempt."""
     enforce_rate_limit(http_request, bucket="ai", session_id=session_id)
     eval_request = DSAEvaluateRequest(
         topic=request.topic,

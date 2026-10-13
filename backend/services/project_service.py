@@ -1,4 +1,4 @@
-"""Business logic for AI-generated project challenges and their evaluation."""
+"""Project challenge generation and review helpers."""
 import json
 
 from config import GEMINI_API_KEY
@@ -140,9 +140,7 @@ Rules:
 
 
 def _project_file_bundle(project_files):
-    """Create a clear, bounded file-by-file source bundle for Gemini (and for
-    persistence — this is also what gets stored as `submission`, so the
-    actual submitted code isn't discarded after evaluation)."""
+    """Create a file-by-file source bundle for Gemini and history."""
     sections = []
     for item in project_files or []:
         path = str(item.get("path", "")).strip()
@@ -154,15 +152,12 @@ def _project_file_bundle(project_files):
 
 
 def build_full_source_bundle(project_files):
-    """Public wrapper: the actual submitted source code, concatenated with
-    file markers. Used both for the Gemini review prompt and for what gets
-    persisted as `submission`, so the original code isn't discarded."""
+    """Return submitted source code with file markers."""
     return _project_file_bundle(project_files)
 
 
 def build_project_submission_manifest(project_files, project_notes=""):
-    """Short human-readable summary (file list + notes) used in messages and
-    as a fallback when there's no bundled source to show."""
+    """Return a short file list when the full bundle is unavailable."""
     files = project_files or []
     lines = [f"Full project source submitted: {len(files)} files"]
     for item in files:

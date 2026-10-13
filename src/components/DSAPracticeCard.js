@@ -50,8 +50,7 @@ export default function DSAPracticeCard() {
           setHiddenTestsEnabled(Boolean(data.hidden_tests_enabled));
         }
       } catch (error) {
-        // Silently keep the banner hidden if the stats call fails — this is
-        // a secondary transparency note, not something worth blocking on.
+        // Keep the transparency banner hidden if this optional call fails.
       }
     }
 
@@ -932,7 +931,7 @@ export default function DSAPracticeCard() {
             {mode === "verified"
               ? hiddenTestsEnabled === false
                 ? "Curated bank — hidden-test execution is currently off on this server, so scoring uses AI review."
-                : "Hidden-test scored — your score can't be gamed."
+                : "Hidden-test scored — deterministic scoring when enabled."
               : "AI-review scored — unlimited topics, no hidden tests."}
           </p>
         </div>

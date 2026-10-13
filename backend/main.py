@@ -1,11 +1,4 @@
-"""ConceptVivaAI FastAPI entrypoint.
-
-This file intentionally stays thin. It only wires up the app, CORS, and
-routers. All request/response logic lives in `routes/`, all business logic
-(Gemini calls, scoring, fallbacks) lives in `services/`, and all persistence
-lives in `crud.py` / `models.py`. This mirrors the layered architecture
-(routes -> services -> models/ML) used across the portfolio projects.
-"""
+"""FastAPI app setup for ConceptVivaAI."""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -20,8 +13,7 @@ from routes.project_routes import router as project_router
 from routes.session_routes import router as session_router
 from routes.translate_routes import router as translate_router
 
-# Re-exported for backward compatibility: tests/test_dsa_runner.py calls
-# `main.run_python_tests(...)` directly.
+# Some older tests import this helper from main.py.
 from services.dsa_service import run_python_tests  # noqa: F401
 
 app = FastAPI(title="ConceptVivaAI Backend")
