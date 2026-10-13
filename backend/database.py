@@ -15,6 +15,19 @@ load_dotenv(BASE_DIR / ".env")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./conceptviva.db")
 
+
+def normalize_database_url(url: str) -> str:
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg2://", 1)
+
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg2://", 1)
+
+    return url
+
+
+DATABASE_URL = normalize_database_url(DATABASE_URL)
+
 connect_args = {}
 
 if DATABASE_URL.startswith("sqlite"):
@@ -25,7 +38,8 @@ if DATABASE_URL.startswith("sqlite"):
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args=connect_args
+    connect_args=connect_args,
+    pool_pre_ping=not DATABASE_URL.startswith("sqlite"),
 )
 
 SessionLocal = sessionmaker(
