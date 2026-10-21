@@ -14,6 +14,15 @@ def _decode_json_field(value, default):
         return default
 
 
+def _evaluation_fields(item):
+    return {
+        "evaluation_status": getattr(item, "evaluation_status", None) or "completed",
+        "prompt_version": getattr(item, "prompt_version", None) or "",
+        "model_name": getattr(item, "model_name", None) or "",
+        "integrity_flags": _decode_json_field(getattr(item, "integrity_flags", None), []),
+    }
+
+
 def serialize_ml_attempt(item):
     return {
         "id": item.id,
@@ -28,6 +37,7 @@ def serialize_ml_attempt(item):
         "missing_points": item.missing_points,
         "corrected_answer": item.corrected_answer,
         "improvement": item.improvement,
+        **_evaluation_fields(item),
         "created_at": format_datetime(item.created_at),
     }
 
@@ -61,6 +71,11 @@ def serialize_dsa_attempt(item):
         "status": item.status,
         "feedback": item.feedback,
         "tier": item.tier,
+        **_evaluation_fields(item),
+        "scoring_method": item.scoring_method or "ai_rubric",
+        "judge_verdict": item.judge_verdict or "",
+        "tests_passed": item.tests_passed or 0,
+        "tests_total": item.tests_total or 0,
         "created_at": format_datetime(item.created_at),
     }
 
@@ -91,5 +106,6 @@ def serialize_project_attempt(item):
         "security_issues": _decode_json_field(item.security_issues, []),
         "missing_requirements": _decode_json_field(item.missing_requirements, []),
         "files_reviewed": item.files_reviewed or 0,
+        **_evaluation_fields(item),
         "created_at": format_datetime(item.created_at),
     }

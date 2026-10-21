@@ -105,7 +105,7 @@ def test_interview_report_accepts_only_signed_round_scores(client):
 def test_project_challenge_generates_reviews_and_updates_dashboard(client, monkeypatch):
     import routes.project_routes as project_routes
 
-    def fake_generate_project_challenge(domain, topic, difficulty):
+    async def fake_generate_project_challenge(domain, topic, difficulty):
         return {
             "project_title": "Student KNN Project",
             "domain": domain,
@@ -119,8 +119,9 @@ def test_project_challenge_generates_reviews_and_updates_dashboard(client, monke
             "submission_checklist": ["Code", "Result"],
         }
 
-    def fake_evaluate_project_submission(**kwargs):
+    async def fake_evaluate_project_submission(**kwargs):
         return {
+            "evaluation_status": "completed",
             "score": 8,
             "verdict": "STRONG",
             "feedback": "The submitted project covers the main flow.",

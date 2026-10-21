@@ -1,19 +1,7 @@
-import os
-from pathlib import Path
-
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-
-BASE_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = BASE_DIR.parent
-
-load_dotenv(PROJECT_ROOT / ".env.local")
-load_dotenv(BASE_DIR / ".env")
-
-
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./conceptviva.db")
+from config import settings
 
 
 def normalize_database_url(url: str) -> str:
@@ -26,7 +14,7 @@ def normalize_database_url(url: str) -> str:
     return url
 
 
-DATABASE_URL = normalize_database_url(DATABASE_URL)
+DATABASE_URL = normalize_database_url(settings.database_url)
 
 connect_args = {}
 

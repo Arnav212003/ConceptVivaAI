@@ -1,10 +1,20 @@
 """FastAPI app setup for ConceptVivaAI."""
-from fastapi import FastAPI
+import hmac
+import os
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import FRONTEND_URL
-from database import Base, DATABASE_URL, engine
-
+from config import settings
+from db_bootstrap import bootstrap_database
+from observability import (
+    RequestContextMiddleware,
+    configure_logging,
+    get_logger,
+    log_event,
+    metrics_response,
+)
 from routes.dashboard_routes import router as dashboard_router
 from routes.dsa_routes import router as dsa_router
 from routes.interview_routes import router as interview_router
@@ -12,27 +22,33 @@ from routes.ml_routes import router as ml_router
 from routes.project_routes import router as project_router
 from routes.session_routes import router as session_router
 from routes.translate_routes import router as translate_router
+from services import llm
 
-# Some older tests import this helper from main.py.
-from services.dsa_service import run_python_tests  # noqa: F401
+configure_logging()
+logger = get_logger("app")
 
-app = FastAPI(title="ConceptVivaAI Backend")
 
-# SQLite fallback for first-time local runs.
-if DATABASE_URL.startswith("sqlite"):
-    Base.metadata.create_all(bind=engine)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    bootstrap_database()
+    if os.getenv("ENABLE_CODE_EXECUTION"):
+        log_event(logger, "deprecated_setting_ignored", level=30, setting="ENABLE_CODE_EXECUTION",
+                  replacement="JUDGE_ENABLED with an isolated executor")
+    log_event(logger, "startup", environment=settings.environment,
+              llm_configured=settings.llm_configured, redis=bool(settings.redis_url))
+    yield
 
+
+app = FastAPI(title="ConceptVivaAI Backend", lifespan=lifespan)
+
+app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://192.168.29.17:3000",
-        FRONTEND_URL,
-    ],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Session-Id", "X-Session-Token", "X-CSRF-Token", "X-Request-ID"],
+    expose_headers=["X-Request-ID", "Retry-After"],
 )
 
 app.include_router(session_router)
@@ -49,3 +65,25 @@ def home():
     return {
         "message": "ConceptVivaAI Python FastAPI backend is running"
     }
+
+
+@app.get("/health")
+def health():
+    """Liveness plus dependency summary. Never includes secrets or URLs."""
+    return {
+        "status": "ok",
+        "llm": {"configured": settings.llm_configured, "circuit": llm.breaker.state},
+        "redis": {"configured": bool(settings.redis_url)},
+    }
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics(authorization: str = Header(default="")):
+    # Metrics are internal. With METRICS_TOKEN set, require `Authorization: Bearer <token>`.
+    if settings.metrics_token:
+        expected = f"Bearer {settings.metrics_token}"
+        if not hmac.compare_digest(authorization.encode(), expected.encode()):
+            raise HTTPException(status_code=401, detail="Metrics token required.")
+    elif settings.environment == "production":
+        raise HTTPException(status_code=404, detail="Not found")
+    return metrics_response()

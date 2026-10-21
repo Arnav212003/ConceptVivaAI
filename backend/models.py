@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.sql import func
 
 from database import Base
@@ -6,6 +6,7 @@ from database import Base
 
 class MLPracticeAttempt(Base):
     __tablename__ = "ml_practice_attempts"
+    __table_args__ = (Index("ix_ml_practice_attempts_session_status", "session_id", "evaluation_status"),)
 
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String(255), index=True, nullable=False)
@@ -16,12 +17,19 @@ class MLPracticeAttempt(Base):
     question = Column(Text, nullable=False)
     answer = Column(Text, nullable=False)
 
-    score = Column(Float, default=0)
+    score = Column(Float, nullable=True)
     verdict = Column(String(50), default="PARTIAL")
     feedback = Column(Text, default="")
     missing_points = Column(Text, default="")
     corrected_answer = Column(Text, default="")
     improvement = Column(Text, default="")
+
+    # "completed" or "unavailable". Unavailable attempts have score NULL and are
+    # excluded from every average.
+    evaluation_status = Column(String(20), nullable=False, default="completed", server_default="completed")
+    prompt_version = Column(String(60), default="")
+    model_name = Column(String(100), default="")
+    integrity_flags = Column(Text, default="[]")
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -47,6 +55,7 @@ class InterviewReport(Base):
 
 class DSAAttempt(Base):
     __tablename__ = "dsa_attempts"
+    __table_args__ = (Index("ix_dsa_attempts_session_status", "session_id", "evaluation_status"),)
 
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String(255), index=True, nullable=False)
@@ -59,11 +68,23 @@ class DSAAttempt(Base):
     problem = Column(Text, default="")
     solution = Column(Text, default="")
 
-    score = Column(Float, default=0)
+    score = Column(Float, nullable=True)
     status = Column(String(100), default="Needs Improvement")
     feedback = Column(Text, default="")
     # Keeps hidden-test attempts separate from AI-reviewed attempts.
     tier = Column(String(30), default="ai_generated")
+
+    # "completed" or "unavailable". Unavailable attempts have score NULL and are
+    # excluded from every average.
+    evaluation_status = Column(String(20), nullable=False, default="completed", server_default="completed")
+    prompt_version = Column(String(60), default="")
+    model_name = Column(String(100), default="")
+    integrity_flags = Column(Text, default="[]")
+    scoring_method = Column(String(30), default="ai_rubric")
+    judge_verdict = Column(String(40), default="")
+    judge_submission_id = Column(String(64), default="")
+    tests_passed = Column(Integer, default=0)
+    tests_total = Column(Integer, default=0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -89,6 +110,7 @@ class ProjectChallenge(Base):
 
 class ProjectAttempt(Base):
     __tablename__ = "project_attempts"
+    __table_args__ = (Index("ix_project_attempts_session_status", "session_id", "evaluation_status"),)
 
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String(255), index=True, nullable=False)
@@ -103,11 +125,18 @@ class ProjectAttempt(Base):
     challenge_json = Column(Text, default="")
     submission = Column(Text, default="")
 
-    score = Column(Float, default=0)
+    score = Column(Float, nullable=True)
     verdict = Column(String(50), default="PARTIAL")
     feedback = Column(Text, default="")
     missing_points = Column(Text, default="")
     improved_approach = Column(Text, default="")
+
+    # "completed" or "unavailable". Unavailable attempts have score NULL and are
+    # excluded from every average.
+    evaluation_status = Column(String(20), nullable=False, default="completed", server_default="completed")
+    prompt_version = Column(String(60), default="")
+    model_name = Column(String(100), default="")
+    integrity_flags = Column(Text, default="[]")
     next_steps = Column(Text, default="")
 
     # Extra review details are stored as JSON text.

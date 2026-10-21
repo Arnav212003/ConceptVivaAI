@@ -1,7 +1,7 @@
 import json
 import secrets
 
-from sqlalchemy import func
+from sqlalchemy import and_, case, func, true
 
 from models import (
     DSAAttempt,
@@ -104,12 +104,16 @@ def create_ml_practice_attempt(db, data):
         level=data.get("level"),
         question=data.get("question"),
         answer=data.get("answer"),
-        score=data.get("score", 0),
+        score=data.get("score"),
         verdict=data.get("verdict", "PARTIAL"),
         feedback=data.get("feedback", ""),
         missing_points=data.get("missing_points", ""),
         corrected_answer=data.get("corrected_answer", ""),
         improvement=data.get("improvement", ""),
+        evaluation_status=data.get("evaluation_status", "completed"),
+        prompt_version=data.get("prompt_version", ""),
+        model_name=data.get("model_name", ""),
+        integrity_flags=_normalize_json_for_db(data.get("integrity_flags", [])),
     )
 
     db.add(attempt)
@@ -147,10 +151,19 @@ def create_dsa_attempt(db, data):
         problem_name=data.get("problem_name", "DSA Problem"),
         problem=data.get("problem", ""),
         solution=data.get("solution", ""),
-        score=data.get("score", 0),
+        score=data.get("score"),
         status=data.get("status", "Needs Improvement"),
         feedback=data.get("feedback", ""),
         tier=data.get("tier", "ai_generated"),
+        evaluation_status=data.get("evaluation_status", "completed"),
+        prompt_version=data.get("prompt_version", ""),
+        model_name=data.get("model_name", ""),
+        integrity_flags=_normalize_json_for_db(data.get("integrity_flags", [])),
+        scoring_method=data.get("scoring_method", "ai_rubric"),
+        judge_verdict=data.get("judge_verdict", ""),
+        judge_submission_id=data.get("judge_submission_id", ""),
+        tests_passed=data.get("tests_passed", 0),
+        tests_total=data.get("tests_total", 0),
     )
 
     db.add(attempt)
@@ -230,11 +243,15 @@ def create_project_attempt(db, data):
         project_title=data.get("project_title", "Project Challenge"),
         challenge_json=_normalize_json_for_db(challenge),
         submission=data.get("submission", ""),
-        score=data.get("score", 0),
+        score=data.get("score"),
         verdict=data.get("verdict", "PARTIAL"),
         feedback=data.get("feedback", ""),
         missing_points=data.get("missing_points", ""),
         improved_approach=data.get("improved_approach", ""),
+        evaluation_status=data.get("evaluation_status", "completed"),
+        prompt_version=data.get("prompt_version", ""),
+        model_name=data.get("model_name", ""),
+        integrity_flags=_normalize_json_for_db(data.get("integrity_flags", [])),
         next_steps=data.get("next_steps", ""),
         architecture_review=data.get("architecture_review", ""),
         file_findings=_normalize_json_for_db(data.get("file_findings", [])),
@@ -251,94 +268,70 @@ def create_project_attempt(db, data):
     return attempt
 
 
+def _scored_filter(model):
+    """Only completed evaluations with a real score count toward averages."""
+    return and_(model.evaluation_status == "completed", model.score.isnot(None))
+
+
+def _attempt_summary(db, model, session_id, extra_filter=None):
+    scored = _scored_filter(model)
+    if extra_filter is not None:
+        scored = and_(scored, extra_filter)
+    count_filter = extra_filter if extra_filter is not None else true()
+
+    total, scored_count, average, unavailable = db.query(
+        func.count(case((count_filter, 1))),
+        func.count(case((scored, 1))),
+        func.avg(case((scored, model.score))),
+        func.count(case((and_(count_filter, model.evaluation_status != "completed"), 1))),
+    ).filter(model.session_id == session_id).one()
+
+    return {
+        "total_attempts": int(total or 0),
+        "scored_attempts": int(scored_count or 0),
+        "unavailable_attempts": int(unavailable or 0),
+        "average_score": round(float(average or 0), 1),
+    }
+
+
 def get_dashboard_stats(db, session_id):
-    ml_count = db.query(MLPracticeAttempt).filter(
-        MLPracticeAttempt.session_id == session_id
-    ).count()
+    ml = _attempt_summary(db, MLPracticeAttempt, session_id)
+    dsa = _attempt_summary(db, DSAAttempt, session_id)
+    dsa_verified = _attempt_summary(db, DSAAttempt, session_id, DSAAttempt.tier == "verified")
+    dsa_ai = _attempt_summary(db, DSAAttempt, session_id, DSAAttempt.tier == "ai_generated")
+    project = _attempt_summary(db, ProjectAttempt, session_id)
 
-    dsa_count = db.query(DSAAttempt).filter(
-        DSAAttempt.session_id == session_id
-    ).count()
-
-    project_count = db.query(ProjectAttempt).filter(
-        ProjectAttempt.session_id == session_id
-    ).count()
-
-    interview_count = db.query(InterviewReport).filter(
-        InterviewReport.session_id == session_id
-    ).count()
-
-    active_project_challenges = db.query(ProjectChallenge).filter(
+    active_project_challenges = db.query(func.count(ProjectChallenge.id)).filter(
         ProjectChallenge.session_id == session_id,
         ProjectChallenge.status == "ACTIVE",
-    ).count()
-
-    ml_avg = db.query(func.avg(MLPracticeAttempt.score)).filter(
-        MLPracticeAttempt.session_id == session_id
     ).scalar() or 0
 
-    dsa_avg = db.query(func.avg(DSAAttempt.score)).filter(
-        DSAAttempt.session_id == session_id
-    ).scalar() or 0
-
-    # Keep verified and AI-reviewed DSA scores separate.
-    dsa_verified_count = db.query(DSAAttempt).filter(
-        DSAAttempt.session_id == session_id,
-        DSAAttempt.tier == "verified",
-    ).count()
-
-    dsa_verified_avg = db.query(func.avg(DSAAttempt.score)).filter(
-        DSAAttempt.session_id == session_id,
-        DSAAttempt.tier == "verified",
-    ).scalar() or 0
-
-    dsa_ai_count = db.query(DSAAttempt).filter(
-        DSAAttempt.session_id == session_id,
-        DSAAttempt.tier == "ai_generated",
-    ).count()
-
-    dsa_ai_avg = db.query(func.avg(DSAAttempt.score)).filter(
-        DSAAttempt.session_id == session_id,
-        DSAAttempt.tier == "ai_generated",
-    ).scalar() or 0
-
-    project_avg = db.query(func.avg(ProjectAttempt.score)).filter(
-        ProjectAttempt.session_id == session_id
-    ).scalar() or 0
-
-    interview_avg = db.query(func.avg(InterviewReport.average_score)).filter(
-        InterviewReport.session_id == session_id
-    ).scalar() or 0
+    interview_count, interview_avg = db.query(
+        func.count(InterviewReport.id),
+        func.avg(InterviewReport.average_score),
+    ).filter(InterviewReport.session_id == session_id).one()
 
     return {
         "session_id": session_id,
-        "ml_practice": {
-            "total_attempts": ml_count,
-            "average_score": round(float(ml_avg), 1),
-        },
+        "ml_practice": ml,
         "dsa_practice": {
-            "total_attempts": dsa_count,
-            "average_score": round(float(dsa_avg), 1),
-            "verified": {
-                "total_attempts": dsa_verified_count,
-                "average_score": round(float(dsa_verified_avg), 1),
-            },
-            "ai_generated": {
-                "total_attempts": dsa_ai_count,
-                "average_score": round(float(dsa_ai_avg), 1),
-            },
+            **dsa,
+            "verified": dsa_verified,
+            "ai_generated": dsa_ai,
         },
         "project_challenge": {
-            "total_attempts": project_count,
-            "active_challenges": active_project_challenges,
-            "average_score": round(float(project_avg), 1),
+            **project,
+            "active_challenges": int(active_project_challenges),
         },
         "voice_interview": {
-            "total_interviews": interview_count,
-            "average_score": round(float(interview_avg), 1),
+            "total_interviews": int(interview_count or 0),
+            "average_score": round(float(interview_avg or 0), 1),
         },
         "overall": {
-            "total_activity": ml_count + dsa_count + project_count + interview_count,
+            "total_activity": ml["total_attempts"] + dsa["total_attempts"]
+            + project["total_attempts"] + int(interview_count or 0),
+            "unavailable_attempts": ml["unavailable_attempts"] + dsa["unavailable_attempts"]
+            + project["unavailable_attempts"],
         },
     }
 

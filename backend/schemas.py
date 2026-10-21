@@ -1,10 +1,23 @@
 """Pydantic request models used by the FastAPI routes."""
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, Field, model_validator
 
 
 class QuestionRequest(BaseModel):
-    topic: str = Field(min_length=1, max_length=2000)
+    topic: str = Field(default="", max_length=2000)
     level: str = Field(default="Easy", min_length=1, max_length=30)
+    # auto_topic lets the server pick from a curated pool, so clients no longer
+    # need to send free-form instructions as the "topic".
+    auto_topic: bool = False
+    track: Literal["ml", "interview"] = "interview"
+    revision_topics: list[str] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def _topic_required_unless_auto(self):
+        if not self.auto_topic and not self.topic.strip():
+            raise ValueError("topic is required unless auto_topic is true")
+        return self
 
 
 class EvaluateRequest(BaseModel):
@@ -118,6 +131,7 @@ class ProjectChallengeRequest(BaseModel):
     domain: str = Field(default="Machine Learning", max_length=100)
     topic: str = Field(default="AI Selected Topic", max_length=2000)
     difficulty: str = Field(default="Beginner", max_length=30)
+    auto_topic: bool = False
 
 
 class ProjectCodeFile(BaseModel):
@@ -134,4 +148,4 @@ class ProjectSubmissionRequest(BaseModel):
 
 
 class TranslateRequest(BaseModel):
-    text: str
+    text: str = Field(min_length=1, max_length=8000)
