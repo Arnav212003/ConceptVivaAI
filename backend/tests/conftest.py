@@ -33,6 +33,7 @@ class FakeLLMBackend:
             "system_instruction": system_instruction,
             "prompt": prompt,
             "schema": response_schema.__name__ if response_schema else None,
+            "temperature": temperature,
         })
         key = response_schema.__name__ if response_schema else "text"
         response = self.responses[key]

@@ -52,7 +52,16 @@ Phase 2 tests: `python -m pytest` → 116 passed.
 
 | Item | Status | Notes |
 |---|---|---|
-| Benchmark pipeline | TODO | |
+| Rubric-based evaluation with versioned prompts | DONE | `services/grading/prompts.py` (`answer_eval@2.0.0` etc.); `prompt_version` + `model_name` stored on every attempt; `tests/test_grading_prompts.py` fails if a prompt changes without a version bump. |
+| Benchmark pipeline for 100 human-labelled answers | DONE | `benchmarks/grader/` (dataset schema + CSV import, graders, metrics, CLI, reports). Human and synthetic rows cannot be mixed in one dataset. |
+| MAE, consistency, correlation | DONE | MAE (+ bootstrap CI), RMSE, Pearson, Spearman, within-1, Cohen's kappa, repeatability (per-item std, identical rate), human inter-rater ceiling. Unit tested against known values. |
+| Repeatability + adversarial tests | DONE | Temperature-0 repeatability test; 10-item synthetic injection suite with attack-success and false-positive rates; `fooled_model` grader measures the server-side defenses alone. |
+| Synthetic data labelled | DONE | `data/synthetic_seed.jsonl` rows all carry `"source": "synthetic"`; reports built from it start with a SYNTHETIC banner. |
+| Offline results (synthetic only) | DONE | `fooled_model` on the seed set: attack success 0.00 (10 attacks), 0/31 honest answers capped. Attacks and heuristics have the same author, so this covers known patterns only. |
+| 100 human labels | BLOCKED | Needs real human labelers. Template: `data/labeling_template.csv`; protocol in `benchmarks/grader/README.md`. No human evaluation data was invented. |
+| Production (Gemini) benchmark run | BLOCKED | Requires approval for billable Gemini calls and the human dataset. Command documented; the CLI refuses without `--allow-api-calls`. |
+
+Phase 3 tests: `python -m pytest` → 132 passed.
 
 ## Phase 4 — Production backend
 

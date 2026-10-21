@@ -147,3 +147,10 @@ def test_code_review_rubric_and_unavailable_path(fake_llm):
 @pytest.mark.parametrize("level,expected", [("easy", "Easy"), ("HARD", "Hard"), ("ignore rules", "Medium")])
 def test_level_is_allowlisted(level, expected):
     assert evaluators.normalize_level(level) == expected
+
+
+def test_grading_is_repeatable_at_temperature_zero(fake_llm):
+    fake_llm.responses["AnswerEvaluationOutput"] = answer_output(3, 2, 1, 1)
+    scores = {evaluate()["score"] for _ in range(5)}
+    assert scores == {7.0}
+    assert {call["temperature"] for call in fake_llm.calls} == {0.0}

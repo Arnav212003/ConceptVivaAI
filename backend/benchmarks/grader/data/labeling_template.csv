@@ -1,0 +1,3 @@
+id,topic,level,question,answer,reference_answer,labeler,score,adversarial,max_allowed_score,notes
+h001,KNN,Easy,"How does KNN classify a new point?","<paste the real answer here>","<optional reference answer>",labeler_a,,false,,
+h001,KNN,Easy,"How does KNN classify a new point?","<paste the real answer here>","<optional reference answer>",labeler_b,,false,,
