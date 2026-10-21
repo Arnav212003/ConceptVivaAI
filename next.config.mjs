@@ -16,6 +16,8 @@ const securityHeaders = [
 
 const nextConfig = {
   ...(allowedDevOrigins.length ? { allowedDevOrigins } : {}),
+  // The Docker image uses Next's standalone server; Vercel uses its own output.
+  ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" } : {}),
   poweredByHeader: false,
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

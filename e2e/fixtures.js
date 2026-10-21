@@ -21,6 +21,16 @@ export async function mockApi(page, { auth = {}, judgeEnabled = true, handlers =
   await page.route("**/api/auth/me", (route) =>
     route.fulfill({ json: { authenticated: false, user: null, google_oauth_enabled: false, ...auth } })
   );
+  await page.route("**/api/analytics", (route) => route.fulfill({ status: 202, json: { recorded: true } }));
+  await page.route("**/api/progress", (route) =>
+    route.fulfill({
+      json: {
+        current_streak_days: 2,
+        active_days_last_30: 4,
+        weeks: [{ week_start: "2026-10-19", attempts: 2, average_score: 8 }],
+      },
+    })
+  );
   await page.route("**/api/dsa?resource=bank-stats", (route) =>
     route.fulfill({ json: { total: 90, hidden_tests_enabled: judgeEnabled } })
   );

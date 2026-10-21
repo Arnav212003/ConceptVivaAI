@@ -7,6 +7,7 @@ import { ErrorBanner, LoadingState, StatCard } from "@/components/ui";
 import useLocalHistory from "@/hooks/useLocalHistory";
 import useSpeechRecognition from "@/hooks/useSpeechRecognition";
 import useSpeechSynthesis from "@/hooks/useSpeechSynthesis";
+import { track } from "@/lib/analytics";
 import { apiPost } from "@/lib/api";
 import { averageScore, formatScore, isScored } from "@/lib/scoring";
 
@@ -155,6 +156,7 @@ export default function InterviewCard() {
     };
     setFinalReport(report);
     history.add(report);
+    track("attempt_submitted", "voice_interview");
 
     try {
       // The backend recomputes the average from its own signed receipts.

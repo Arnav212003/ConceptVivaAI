@@ -1,0 +1,18 @@
+# Code-execution sandbox. Contains only the judge harness and process runner:
+# no API code, no database driver, no secrets other than SANDBOX_SHARED_SECRET.
+# Hardening (read-only FS, dropped capabilities, pids/memory/CPU limits, internal
+# network) is applied by the runtime; see the `sandbox` service in docker-compose.yml.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+RUN pip install fastapi==0.137.0 "uvicorn==0.46.0"
+
+COPY judge/__init__.py judge/harness_script.py judge/limits_launcher.py judge/process_runner.py \
+     judge/sandbox_server.py judge/signing.py judge/verdicts.py ./judge/
+
+# The server starts as root only so it can drop each submission to uid 65534
+# (nobody) via setuid; the container keeps just SETUID/SETGID/KILL capabilities.
+EXPOSE 8090
+CMD ["uvicorn", "judge.sandbox_server:app", "--host", "0.0.0.0", "--port", "8090", "--workers", "1"]

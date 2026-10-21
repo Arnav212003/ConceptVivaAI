@@ -1,12 +1,14 @@
 """Run the harness in a resource-limited child process.
 
 Used inside the sandbox container (judge/sandbox_server.py) and by the dev-only
-local executor. On Linux the child gets, before exec:
-- RLIMIT_CPU (CPU seconds), RLIMIT_AS (address space = memory), RLIMIT_NPROC
-  (no fork bombs), RLIMIT_FSIZE (no large files), RLIMIT_NOFILE, RLIMIT_CORE=0
-- its own session (so the whole process group is killed on timeout)
-- a drop to an unprivileged uid/gid when started as root
-- an empty environment and an empty temporary working directory
+local executor. On Linux the child:
+- starts in its own process group (so the whole group is killed on timeout)
+- is dropped to uid/gid 65534 (nobody) when the parent runs as root
+- runs `limits_launcher.py` first, which sets RLIMIT_CPU (CPU seconds), RLIMIT_AS
+  (memory), RLIMIT_NPROC (no fork bombs), RLIMIT_FSIZE, RLIMIT_NOFILE and
+  RLIMIT_CORE=0 and then execs the harness
+- gets an empty environment and an empty temporary working directory
+All of this uses Popen's thread-safe parameters instead of `preexec_fn`.
 Wall-clock time and stdout/stderr size are enforced by this parent process.
 Network isolation is provided by the container network (see docker-compose.yml),
 not by this module. On Windows only wall-clock and output limits apply, which is
@@ -14,6 +16,7 @@ why the local executor is refused unless JUDGE_ALLOW_UNSAFE_LOCAL=true.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import signal
@@ -28,6 +31,7 @@ from pathlib import Path
 from judge.verdicts import ExecutionOutcome
 
 HARNESS_PATH = Path(__file__).resolve().parent / "harness_script.py"
+LAUNCHER_PATH = Path(__file__).resolve().parent / "limits_launcher.py"
 NOBODY_UID = 65534
 
 
@@ -43,24 +47,6 @@ class Limits:
 
 def harness_source() -> str:
     return HARNESS_PATH.read_text(encoding="utf-8")
-
-
-def _limit_child(limits: Limits):  # pragma: no cover - runs in the forked child on POSIX
-    import resource
-
-    cpu = max(1, int(limits.cpu_seconds + 0.999))
-    memory = limits.memory_mb * 1024 * 1024
-    resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu + 1))
-    resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
-    resource.setrlimit(resource.RLIMIT_NPROC, (limits.max_processes, limits.max_processes))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (limits.max_file_bytes, limits.max_file_bytes))
-    resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    os.setsid()
-    if os.getuid() == 0:
-        os.setgroups([])
-        os.setgid(NOBODY_UID)
-        os.setuid(NOBODY_UID)
 
 
 def _drain(stream, sink: bytearray, cap: int, overflow: threading.Event):
@@ -87,8 +73,22 @@ def _kill(process: subprocess.Popen):
 
 def run_harness(stdin_payload: str, limits: Limits, python_executable: str | None = None) -> ExecutionOutcome:
     workdir = tempfile.mkdtemp(prefix="cv_judge_")
-    command = [python_executable or sys.executable, "-I", "-S", "-B", str(HARNESS_PATH)]
-    preexec = (lambda: _limit_child(limits)) if os.name == "posix" else None
+    python = python_executable or sys.executable
+    popen_kwargs = {}
+    if os.name == "posix":
+        limits_json = json.dumps({
+            "cpu_seconds": limits.cpu_seconds,
+            "memory_mb": limits.memory_mb,
+            "max_processes": limits.max_processes,
+            "max_file_bytes": limits.max_file_bytes,
+        })
+        command = [python, "-I", "-S", "-B", str(LAUNCHER_PATH), limits_json, str(HARNESS_PATH)]
+        popen_kwargs["process_group"] = 0
+        if os.geteuid() == 0:
+            os.chmod(workdir, 0o711)
+            popen_kwargs.update(user=NOBODY_UID, group=NOBODY_UID, extra_groups=[])
+    else:
+        command = [python, "-I", "-S", "-B", str(HARNESS_PATH)]
     started = time.perf_counter()
 
     try:
@@ -99,8 +99,8 @@ def run_harness(stdin_payload: str, limits: Limits, python_executable: str | Non
             stderr=subprocess.PIPE,
             cwd=workdir,
             env={"PYTHONIOENCODING": "utf-8", "PYTHONHASHSEED": "0"},
-            preexec_fn=preexec,  # noqa: PLW1509 - limits must be applied before exec
             close_fds=True,
+            **popen_kwargs,
         )
     except OSError as exc:
         shutil.rmtree(workdir, ignore_errors=True)

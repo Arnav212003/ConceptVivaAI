@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+backend
+loadtests
+e2e
+test-results
+playwright-report
+coverage
+.env
+.env.*
+!.env.example
+*.log

@@ -15,6 +15,7 @@ from observability import (
     log_event,
     metrics_response,
 )
+from routes.analytics_routes import router as analytics_router
 from routes.auth_routes import router as auth_router
 from routes.dashboard_routes import router as dashboard_router
 from routes.dsa_routes import router as dsa_router
@@ -60,6 +61,7 @@ app.include_router(ml_router)
 app.include_router(project_router)
 app.include_router(dashboard_router)
 app.include_router(translate_router)
+app.include_router(analytics_router)
 
 
 @app.get("/")

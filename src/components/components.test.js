@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import ResultCard from "@/components/ResultCard";
 import { TierBadge } from "@/components/dsa/Badges";
 import { TestCaseList, VerdictBanner, deriveVerdict } from "@/components/dsa/TestResults";
@@ -103,5 +103,40 @@ describe("dashboard aggregation", () => {
     expect(timeline[0].subtitle).toContain("Not scored");
     const readiness = buildTopicReadiness(timeline);
     expect(readiness).toEqual([expect.objectContaining({ topic: "KNN", attempts: 1, readiness: 80 })]);
+  });
+});
+
+describe("progress panel", () => {
+  it("renders streak and one bar per week", async () => {
+    const { ProgressPanel } = await import("@/components/dashboard/widgets");
+    render(
+      <ProgressPanel
+        progress={{
+          current_streak_days: 3,
+          active_days_last_30: 5,
+          weeks: [
+            { week_start: "2026-10-12", attempts: 2, average_score: 6 },
+            { week_start: "2026-10-19", attempts: 4, average_score: null },
+          ],
+        }}
+      />
+    );
+    expect(screen.getByTestId("streak")).toHaveTextContent("3 days");
+    expect(screen.getByRole("img")).toBeInTheDocument();
+    expect(screen.getByTitle(/Week of 2026-10-19: 4 attempt\(s\), average Not scored/)).toBeInTheDocument();
+  });
+});
+
+describe("analytics client", () => {
+  it("sends nothing when Do Not Track is on", async () => {
+    const { track } = await import("@/lib/analytics");
+    const beacon = vi.fn();
+    Object.defineProperty(navigator, "sendBeacon", { value: beacon, configurable: true });
+    Object.defineProperty(navigator, "doNotTrack", { value: "1", configurable: true });
+    track("page_view", "/");
+    expect(beacon).not.toHaveBeenCalled();
+    Object.defineProperty(navigator, "doNotTrack", { value: "0", configurable: true });
+    track("page_view", "/");
+    expect(beacon).toHaveBeenCalledTimes(1);
   });
 });

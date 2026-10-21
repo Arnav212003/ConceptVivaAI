@@ -9,6 +9,7 @@ import useDsaWorkspace from "@/hooks/useDsaWorkspace";
 import useJudgeStatus from "@/hooks/useJudgeStatus";
 import useLocalHistory from "@/hooks/useLocalHistory";
 import useSolutionVoice from "@/hooks/useSolutionVoice";
+import { track } from "@/lib/analytics";
 import { apiPost } from "@/lib/api";
 import { DSA_TOPICS } from "@/lib/difficulty";
 
@@ -65,6 +66,7 @@ export default function DSAMockCard() {
     }
     const data = await workspace.submit({ topic: questionTopic, difficulty: questionDifficulty, mode: "Mock Interview" });
     if (data) {
+      track("attempt_submitted", "dsa_mock");
       const today = new Date();
       history.add({
         date: today.toLocaleDateString(),

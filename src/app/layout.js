@@ -1,4 +1,5 @@
 import "./globals.css";
+import AnalyticsTracker from "@/components/AnalyticsTracker";
 import { AuthProvider } from "@/components/AuthProvider";
 import Navbar from "@/components/Navbar";
 
@@ -18,6 +19,7 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body className="overflow-x-hidden">
         <AuthProvider>
+          <AnalyticsTracker />
           <Navbar />
           {children}
         </AuthProvider>

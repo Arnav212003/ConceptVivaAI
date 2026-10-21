@@ -7,6 +7,7 @@ import ProjectReview from "@/components/project/ProjectReview";
 import ValueList from "@/components/project/ValueList";
 import { EmptyState, ErrorBanner, LoadingState, StatCard } from "@/components/ui";
 import useLocalHistory from "@/hooks/useLocalHistory";
+import { track } from "@/lib/analytics";
 import { apiPost } from "@/lib/api";
 import { averageScore, formatScore } from "@/lib/scoring";
 
@@ -99,6 +100,7 @@ export default function ProjectChallengeCard() {
         project_notes: "Full source-folder submission",
       });
       setReview(data);
+      track("attempt_submitted", "project_challenge");
       const now = new Date();
       history.add({
         date: now.toLocaleDateString(),

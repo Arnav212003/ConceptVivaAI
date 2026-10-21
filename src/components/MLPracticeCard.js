@@ -4,6 +4,7 @@ import { useState } from "react";
 import LocalHistoryTable from "@/components/LocalHistoryTable";
 import { ErrorBanner, IntegrityNotice, LoadingState, ScoreValue, StatCard, UnavailableNotice } from "@/components/ui";
 import useLocalHistory from "@/hooks/useLocalHistory";
+import { track } from "@/lib/analytics";
 import { apiPost } from "@/lib/api";
 import { averageScore, formatScore } from "@/lib/scoring";
 
@@ -68,6 +69,7 @@ export default function MLPracticeCard() {
         save_attempt: true,
       });
       setResult(data);
+      track("attempt_submitted", "ml_practice");
       const now = new Date();
       history.add({
         date: now.toLocaleDateString(),

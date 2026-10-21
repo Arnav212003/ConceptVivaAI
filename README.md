@@ -1,283 +1,222 @@
 # ConceptVivaAI
 
-ConceptVivaAI is my full-stack practice platform for technical interview preparation. I built it to practice topic-wise interviews while learning ML, DSA, system design basics, FastAPI, Next.js, and AI API integration.
+[![CI](https://github.com/Arnav212003/ConceptVivaAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Arnav212003/ConceptVivaAI/actions/workflows/ci.yml)
 
-The project is still evolving, but the current version supports AI-based practice, DSA coding practice, voice interview rounds, project challenge reviews, dashboard tracking, and session handling.
+An interview-preparation platform for ML concepts, DSA coding, voice mock interviews
+and project reviews. Answers are graded by a rubric-based LLM grader that is hardened
+against prompt injection and measured with a benchmark. Code is judged by hidden
+tests in an isolated sandbox, never inside the API.
 
-## What It Does
+> Live demo: _not deployed yet_ (see [Deployment](#deployment)). Replace with your Vercel URL.
 
-- Generates ML and interview questions based on a selected topic or an AI-selected topic.
-- Evaluates answers using Gemini and gives feedback, missing points, corrected answers, and follow-up questions.
-- Provides DSA practice with a curated question bank and AI-generated practice questions.
-- Supports a DSA mock set with mixed difficulty questions.
-- Includes a voice interview mode using browser speech recognition and speech synthesis.
-- Generates project challenges and reviews submitted source folders.
-- Tracks saved attempts in SQLite locally, with PostgreSQL support for deployment.
-- Uses signed session tokens so each browser session has its own history without a login page.
+## Features
 
-## Why I Built It
+| Area | What you can do |
+|---|---|
+| ML practice | Topic-wise (or auto-selected) questions; rubric score with per-criterion rationale, missing points, model answer, follow-up. |
+| DSA practice | 90 curated questions with hidden tests, or unlimited AI-generated problems on any topic. Monaco editor, Run (hidden tests) and Submit. |
+| DSA mock interview | 10-question mixed sets (3 Easy / 4 Medium / 3 Hard). |
+| Code judge | Accepted, Wrong Answer, Time Limit Exceeded, Memory Limit Exceeded, Output Limit Exceeded, Runtime Error, Compilation Error. |
+| Voice interview | Browser speech recognition + synthesis, follow-ups for partial answers, revision queue, final report built from server-signed round scores. |
+| Explanations | "Stuck?" reveals the optimized solution and reads it aloud in English or Hindi. |
+| Project challenges | AI-generated mini projects; upload a whole source folder for cross-file review (bugs, security, missing requirements). |
+| Dashboard | Per-module averages, verified vs AI-scored DSA, topic readiness, streak and weekly progress, history. |
+| Accounts | Works as a guest instantly; optional Google sign-in moves guest history to the account and syncs across devices. |
 
-I wanted one project that connects multiple things I am learning as a BTech CSE student:
+## Architecture
 
-- backend APIs with FastAPI
-- frontend development with Next.js and React
-- database models with SQLAlchemy
-- AI integration with Gemini
-- basic security improvements such as signed sessions and server-side score handling
-- practical interview-preparation workflows
-
-This is not meant to be a big-company product. It is a student portfolio project with real features, simple architecture, and enough production-style thinking to discuss in interviews.
-
-## Tech Stack
-
-**Frontend**
-
-- Next.js App Router
-- React
-- Tailwind CSS
-- Monaco Editor for the DSA code editor
-- Web Speech API for voice interview mode
-
-**Backend**
-
-- FastAPI
-- SQLAlchemy
-- SQLite for local development
-- PostgreSQL support for deployment
-- Alembic migrations
-- Pydantic
-- Google Gemini API
-- HMAC-signed session tokens
-
-## Main Features
-
-### ML Practice
-
-- Topic-wise AI-generated questions
-- Answer evaluation with score, feedback, missing points, and corrected answer
-- Optional AI-selected topic when the user leaves the topic blank
-- Saved practice attempts shown on the dashboard
-
-### DSA Practice
-
-- Curated DSA question bank
-- AI practice mode for custom topics like Segment Trees, Tries, or Graphs
-- Monaco-based Python editor
-- AI feedback with optimized approach, explanation, and complexity
-- Tier tracking for verified-bank questions vs AI-generated questions
-
-### Voice Interview
-
-- Browser speech recognition for spoken answers
-- AI-generated interview questions and follow-ups
-- Round-wise scoring
-- Final report with strong points, weak points, and recommendation
-- Signed evaluation receipts so final reports are based on backend-generated scores
-
-### Project Challenge
-
-- AI-generated mini project challenges
-- Full source-folder submission from the browser
-- Backend review for architecture, bugs, missing requirements, and security issues
-- Project attempts saved to database history
-
-### Dashboard
-
-- Total attempts across ML, DSA, project, and voice interview modes
-- Average score tracking
-- Topic-wise readiness
-- Recent activity history
-- DSA stats split by verified and AI-generated tiers
-
-## Folder Structure
-
-```text
-backend/
-  main.py                 FastAPI app setup and router registration
-  config.py               Environment variable loading
-  database.py             SQLAlchemy engine and session setup
-  models.py               Database tables
-  alembic/                Database migrations
-  alembic.ini             Alembic configuration
-  schemas.py              Pydantic request models
-  crud.py                 Database helper functions
-  security.py             Session tokens, logout, and score receipts
-  rate_limit.py           Simple in-memory rate limiting
-  dsa_runner.py           Local DSA runner for supported curated questions
-  routes/                 FastAPI route files
-  services/               Gemini and feature logic
-  data/                   Curated question data
-  tests/                  Backend tests
-
-src/
-  app/                    Next.js pages and API proxy routes
-  components/             Reusable UI components
-  utils/session.js        Frontend session helper
+```mermaid
+flowchart LR
+    B["Browser"] --> N["Next.js app<br/>UI + /api proxy"]
+    N -->|"guest headers / HttpOnly cookie + CSRF"| A["FastAPI API"]
+    A --> P[("PostgreSQL<br/>attempts, users")]
+    A --> R[("Redis<br/>rate limits, cache, judge queue")]
+    A --> L["LLM gateway<br/>timeouts, retries, breaker"]
+    L --> G["Gemini API"]
+    A --> O["Google OAuth"]
+    W["Judge worker"] --> R
+    W --> X{"Executor"}
+    X --> J0["Judge0"]
+    X --> S["Sandbox container<br/>internal network only"]
 ```
 
-## Environment Setup
+The browser only talks to the Next.js origin, so auth cookies are first-party. The
+API never executes submitted code: it enqueues a job in Redis, and a separate worker
+sends it to an isolated executor.
 
-The project reads backend environment variables from the root `.env.local` file. Backend-only overrides can also be placed in `backend/.env`.
-
-Do not commit real API keys. Use dummy values in examples and keep real values only in local env files.
-
-Create this file in the project root:
-
-```env
-# Frontend
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-PYTHON_BACKEND_URL=http://127.0.0.1:8000
-
-# Backend
-GEMINI_API_KEY=your_dummy_gemini_api_key
-SESSION_SECRET_KEY=replace_with_a_long_random_local_secret
-SESSION_TTL_SECONDS=2592000
-DATABASE_URL=sqlite:///./conceptviva.db
-FRONTEND_URL=http://localhost:3000
-
-# Local SQLite:
-# DATABASE_URL=sqlite:///./conceptviva.db
-
-# Production PostgreSQL:
-# DATABASE_URL=postgresql+psycopg2://username:password@host:5432/database_name
-
-# Keep false unless you are running code in a trusted sandbox.
-ENABLE_CODE_EXECUTION=false
-
-# Optional rate limits
-AI_REQUESTS_PER_MINUTE=20
-GENERAL_REQUESTS_PER_MINUTE=120
-SESSION_STARTS_PER_MINUTE=20
+```mermaid
+sequenceDiagram
+    participant U as Browser
+    participant API as FastAPI
+    participant Q as Redis queue
+    participant W as Judge worker
+    participant S as Sandbox / Judge0
+    U->>API: POST /evaluate-dsa-solution (bank question)
+    API->>Q: LPUSH submission (code, hidden tests)
+    W->>Q: BLMOVE queue -> processing
+    W->>S: run harness (CPU, memory, process, output limits; no network)
+    S-->>W: per-test results
+    W->>Q: store verdict, delete source
+    API->>Q: poll result (bounded wait)
+    API->>API: score = passed/total x 10, AI feedback in parallel
+    API-->>U: verdict + score (tier "verified")
 ```
 
-## Run Backend on Windows PowerShell
+## Engineering highlights
+
+1. **LLM grading that cannot be talked into a 10.** User text is placed in nonce-delimited
+   untrusted blocks, separate from the system instruction. Gemini returns structured JSON
+   validated against Pydantic schemas. The model returns rubric points and the server
+   computes the score, so an injected `"score": 10` is ignored. Heuristic and model-reported
+   manipulation caps the score.
+   ([`services/grading/`](backend/services/grading))
+2. **No fake scores.** When Gemini is down, the attempt is stored as
+   `evaluation_status = "unavailable"` with a NULL score, receives no signed receipt and
+   is excluded from every average. The old behaviour saved a placeholder 5/10.
+3. **Isolated code judge.** Redis reliable queue (BLMOVE + processing list, stale-job
+   recovery, backpressure, heartbeats) and a worker that talks to Judge0 or to a hardened
+   sandbox container (rlimits, uid drop, dropped capabilities, read-only FS, internal-only
+   network). Only the sample case and the first failing case are revealed.
+   ([`backend/judge/`](backend/judge))
+4. **Grader benchmark.** Pipeline for evaluating the grader against human labels: MAE
+   (bootstrap CI), Pearson/Spearman, kappa, repeatability, human inter-rater ceiling,
+   adversarial attack-success rate and false-positive rate. Synthetic and human data
+   cannot be mixed. ([`backend/benchmarks/grader/`](backend/benchmarks/grader))
+5. **Production backend.** Async LLM gateway with timeouts, bounded retries with backoff
+   and a circuit breaker; Redis sliding-window rate limiting shared across instances;
+   JSON logs with request IDs and secret redaction; Prometheus metrics; safe caching;
+   Locust load tests.
+
+## Tech stack
+
+**Frontend:** Next.js 16 (App Router), React 19, Tailwind CSS, Monaco Editor, Web Speech API, Vitest + Testing Library, Playwright.
+**Backend:** FastAPI, SQLAlchemy 2, Alembic, Pydantic 2, PostgreSQL (SQLite for local dev), Redis, Google Gen AI SDK, google-auth, Prometheus client, pytest + fakeredis, Locust.
+**Infra:** Docker Compose, GitHub Actions, Vercel (frontend), Render (API + worker + Redis), Neon (PostgreSQL), Judge0 (code execution).
+
+## Quick start
+
+### Option A: local, no Docker (Windows PowerShell)
 
 ```powershell
+copy .env.example .env.local      # then set SESSION_SECRET_KEY (and GEMINI_API_KEY if you have one)
+
 cd backend
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+py -m venv venv
+.\venv\Scripts\Activate.ps1
 python -m pip install -r requirements-dev.txt
-alembic upgrade head
-uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --port 8000     # SQLite is migrated automatically on startup
 ```
 
-Backend URL:
-
-```text
-http://localhost:8000
-```
-
-If PowerShell blocks virtualenv activation, run:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
-```
-
-## Run Frontend on Windows PowerShell
-
-Open a second terminal from the project root:
+In a second terminal from the project root:
 
 ```powershell
 npm install
-npm run dev
+npm run dev        # http://localhost:3000
 ```
 
-Frontend URL:
+Without `GEMINI_API_KEY` the app still runs: questions use templates and evaluations
+are shown as "Not scored". Without Redis and a judge worker, curated DSA questions are
+AI-reviewed and labelled as such.
+
+### Option B: full stack with Docker Compose
+
+```bash
+cp .env.example .env    # set SESSION_SECRET_KEY and SANDBOX_SHARED_SECRET
+docker compose up --build
+```
+
+This starts PostgreSQL, Redis, migrations, the API, the judge worker, the hardened
+sandbox and the frontend on http://localhost:3000, with hidden-test judging enabled.
+
+## Testing
+
+| Suite | Command | Result at last run |
+|---|---|---|
+| Backend unit/integration | `cd backend && python -m pytest` | 171 passed |
+| Frontend unit/component | `npm test` | 27 passed |
+| End-to-end (desktop + mobile Chromium) | `npm run test:e2e` | 12 passed |
+| Lint / build | `npm run lint`, `npm run build` | clean / OK |
+| Grader benchmark (offline) | `python -m benchmarks.grader.run_benchmark --dataset benchmarks/grader/data/synthetic_seed.jsonl --grader fooled_model` | see below |
+| Load test | `locust -f loadtests/locustfile.py ...` | see [`loadtests/RESULTS.md`](loadtests/RESULTS.md) |
+
+CI also runs the Alembic migrations up, down and up again on a real PostgreSQL
+service, runs the judge tests on Linux (where rlimits apply), validates
+`docker-compose.yml` and builds all three images.
+
+## Security model
+
+| Concern | Control |
+|---|---|
+| Guest identity | HMAC-signed session tokens, revocable (`revoked_sessions`). |
+| Accounts | Google OAuth (authorization code + PKCE, state, nonce), ID token verified (signature, audience, issuer, expiry, `email_verified`). |
+| Session cookies | `HttpOnly`, `SameSite=Lax`, `Secure` in production; only SHA-256 hashes stored; expiry and logout revocation. |
+| CSRF | Double-submit token bound to the session with HMAC, plus Origin allowlist, on every unsafe cookie-authenticated request. |
+| Score integrity | Scores computed server-side; interview reports accept only HMAC-signed evaluation receipts; unavailable evaluations get no receipt. |
+| Prompt injection | Untrusted-data blocks with random boundaries, delimiter neutralization, heuristics (prose + code comments/strings), model self-report, score cap, strict output schemas. |
+| Untrusted code | Never in the API process. Judge0 or a sandbox container with CPU/memory/process/file limits, uid 65534, dropped capabilities, no-new-privileges, read-only root, internal-only network, HMAC-signed requests. |
+| Abuse | Redis sliding-window rate limits (AI, judge, general, session start), queue backpressure, request size limits on every field. |
+| Secrets | Loaded only from env; redacted from logs; `.env*` git-ignored; metrics and analytics summaries are token-protected. |
+| Privacy | Analytics are anonymous daily aggregates from an allowlist; Do-Not-Track and Global Privacy Control are honored. Submitted code is deleted from Redis after judging. |
+
+## AI grader benchmark
+
+The pipeline is ready for 100+ human-labelled answers. The labeling protocol and CSV
+template are in [`backend/benchmarks/grader/README.md`](backend/benchmarks/grader/README.md).
+So far only **synthetic** offline runs exist. With the model assumed fully fooled
+(`fooled_model`), the server-side defenses blocked all 10 synthetic injection attacks
+and capped 0 of 31 honest answers. The attacks and the heuristics have the same author,
+so this covers known patterns only. No human-agreement numbers are claimed yet.
+
+## Deployment
+
+1. **Database (Neon).** Create a project and copy the connection string
+   (`postgresql://...?sslmode=require`).
+2. **Code execution (Judge0).** Use a self-hosted Judge0 CE on a VM, or a hosted
+   Judge0 endpoint. Note `JUDGE0_URL` and the API key.
+3. **Backend (Render).** New Blueprint from `render.yaml`. This creates the API, the
+   judge worker and Redis. Fill in the `sync: false` values (DATABASE_URL, GEMINI_API_KEY,
+   FRONTEND_URL, CORS_ORIGINS, JUDGE0_URL/KEY, Google OAuth values). Migrations run as
+   the pre-deploy command.
+4. **Frontend (Vercel).** Import the repo and set `PYTHON_BACKEND_URL` to the Render
+   API URL.
+5. **Google sign-in (optional).** In Google Cloud Console create an OAuth client (Web).
+   Set the authorized redirect URI to `https://<vercel-app>/api/auth/google/callback`
+   and copy the ID and secret into Render.
+6. Visit `/health` on the API and run the Locust test against the deployed URL.
+
+## Known limitations
+
+- The human-labelled benchmark has not been collected; grader accuracy against humans is unmeasured.
+- Each curated DSA question has 3 hidden tests; more edge cases would make verdicts stricter.
+- Judge0 and the Docker sandbox have not been exercised end to end on this machine (no Docker locally); CI builds the images, and the harness is tested through a real subprocess.
+- The self-hosted sandbox relies on container hardening, so on a PaaS without those controls use Judge0.
+- Guest sessions still use localStorage tokens (signed accounts use HttpOnly cookies).
+- In-memory fallbacks (no Redis) are per-process, which is fine for local dev but not for multiple instances.
+- Load-test numbers are from a single local process; production numbers are pending deployment.
+
+## Project structure
 
 ```text
-http://localhost:3000
+backend/
+  main.py, config.py            app setup, single source of configuration
+  auth.py, security.py          Google OAuth + cookie sessions + CSRF; guest HMAC sessions, receipts
+  services/llm.py               async LLM gateway (structured output, retries, circuit breaker)
+  services/grading/             prompts (versioned), rubrics, schemas, injection defenses, evaluators
+  judge/                        queue, worker, executors, sandbox server, harness, verdicts
+  benchmarks/grader/            grader benchmark (dataset, graders, metrics, CLI)
+  analytics.py                  anonymous aggregates + per-user progress
+  rate_limit.py, cache.py       Redis sliding window, safe cache
+  observability.py              JSON logs, request ids, Prometheus metrics
+  alembic/versions/             0001 schema, 0002 evaluation status, 0003 auth, 0004 analytics
+  tests/                        pytest suites
+src/
+  app/                          pages and /api proxy routes
+  components/                   feature cards + dsa/, project/, dashboard/, ui/
+  hooks/                        workspace, speech, voice explanation, local history, judge status
+  lib/                          API client, backend proxy, scoring, analytics
+e2e/                            Playwright tests
+loadtests/                      Locust scenario and results
+docker-compose.yml, render.yaml, Dockerfile, backend/Dockerfile, backend/Dockerfile.sandbox
 ```
 
-If PowerShell blocks `npm.ps1`, use:
-
-```powershell
-npm.cmd run dev
-```
-
-## Useful Checks
-
-Frontend:
-
-```powershell
-npm run lint
-npm run build
-```
-
-Backend:
-
-```powershell
-cd backend
-.\.venv\Scripts\Activate.ps1
-python -m pytest
-```
-
-## Database and Migrations
-
-For local development, SQLite is still the simplest option:
-
-```env
-DATABASE_URL=sqlite:///./conceptviva.db
-```
-
-For deployment, use PostgreSQL through `DATABASE_URL`:
-
-```env
-DATABASE_URL=postgresql+psycopg2://username:password@host:5432/database_name
-```
-
-The backend also accepts plain `postgresql://...` URLs and normalizes them for the `psycopg2` driver.
-
-Alembic is now included for database schema changes:
-
-```powershell
-cd backend
-alembic revision --autogenerate -m "message"
-alembic upgrade head
-```
-
-`Base.metadata.create_all(bind=engine)` is still kept as a small SQLite-only local fallback, so first-time users do not get stuck if they run the backend before learning migrations. For a deployed PostgreSQL backend, run `alembic upgrade head` before starting the app.
-
-If you already have an old local SQLite database created before Alembic, either back it up and delete the local `.db` file for a fresh start, or run `alembic stamp head` after confirming the tables already match the models.
-
-## Deployment Database Note
-
-SQLite is useful for local learning, but it is not a good choice for deployed data on platforms with ephemeral filesystems. On Render and similar platforms, local SQLite files can be lost after redeploys or restarts.
-
-For deployment, use PostgreSQL. Render Free Postgres is useful for demos, but it expires after 30 days. For a longer-running deployment, use paid Render Postgres or an external PostgreSQL provider such as Supabase, Neon, Railway, or Aiven.
-
-This does not make the project a full production SaaS. It simply makes the student portfolio project easier to deploy and closer to real backend practice.
-
-## Security Improvements Already Added
-
-- Session IDs and tokens are signed with HMAC.
-- Logout revokes the current session token.
-- Interview reports use signed evaluation receipts, so the browser cannot freely choose the final average.
-- Legacy save endpoints re-evaluate answers on the backend instead of trusting client-provided scores.
-- Basic request size limits are added for answers, DSA solutions, and project source files.
-- AI endpoints have simple in-memory rate limiting.
-- `.env` files, SQLite databases, virtual environments, build folders, and dependency folders are ignored by Git.
-- DSA code execution is disabled by default because raw Python subprocess execution is not a strong sandbox.
-
-## Important Notes
-
-- Gemini feedback is useful for practice, but it is still AI-based feedback and may not always be perfect.
-- SQLite is fine for this project stage. For a deployed multi-user version, PostgreSQL would be better.
-- Alembic migrations should be used for deployed database changes.
-- The local DSA runner is for supported curated questions and should only be enabled in a trusted sandbox.
-- Session tokens are currently stored in browser local storage. A more secure deployed version should use HttpOnly cookies.
-
-## Future Improvements
-
-- Expand Alembic migration coverage as the schema changes.
-- Move DSA code execution to a real sandbox or external judge service.
-- Use cookie-based sessions instead of local storage tokens.
-- Add more FastAPI integration tests for routes, auth, dashboard, and project flow.
-- Add stronger project-file secret scanning before storing submitted source.
-- Improve mobile UI polish and accessibility.
-- Add more curated DSA questions and topic coverage.
-
-## Current Status
-
-This project is built to be understandable and explainable in interviews. The architecture is intentionally simple: Next.js handles the UI and API proxy routes, FastAPI handles backend logic, SQLite/PostgreSQL stores attempts, and Gemini powers question generation and feedback.
+Implementation progress, blockers and test history: [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md).

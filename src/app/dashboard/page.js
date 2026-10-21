@@ -6,6 +6,7 @@ import {
   ModuleCard,
   OverviewCard,
   ProgressBar,
+  ProgressPanel,
   SectionCard,
   SkeletonGrid,
   buildTimeline,
@@ -30,6 +31,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [history, setHistory] = useState(null);
+  const [progress, setProgress] = useState(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -42,6 +44,8 @@ export default function DashboardPage() {
       ]);
       setStats(statsData);
       setHistory(historyData);
+      // Progress is a nice-to-have; the dashboard still works if it fails.
+      apiGet("/api/progress").then(setProgress).catch(() => setProgress(null));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -139,6 +143,12 @@ export default function DashboardPage() {
               </div>
             </>
           )
+        )}
+
+        {progress && (
+          <div className="mb-8">
+            <ProgressPanel progress={progress} />
+          </div>
         )}
 
         <div className="mb-8 grid gap-6 lg:grid-cols-3">

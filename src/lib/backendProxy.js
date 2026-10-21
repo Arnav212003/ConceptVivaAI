@@ -30,10 +30,13 @@ function backendCookies(cookieHeader) {
     .join("; ");
 }
 
-function forwardedHeaders(request) {
+// Anonymous requests (analytics) carry no identity: only privacy signals.
+const ANONYMOUS_REQUEST_HEADERS = ["content-type", "dnt", "sec-gpc", "x-request-id"];
+
+function forwardedHeaders(request, anonymous = false) {
   const headers = new Headers();
 
-  for (const name of FORWARDED_REQUEST_HEADERS) {
+  for (const name of anonymous ? ANONYMOUS_REQUEST_HEADERS : FORWARDED_REQUEST_HEADERS) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
@@ -42,7 +45,7 @@ function forwardedHeaders(request) {
     headers.set("content-type", "application/json");
   }
 
-  const cookies = backendCookies(request.headers.get("cookie"));
+  const cookies = anonymous ? "" : backendCookies(request.headers.get("cookie"));
   if (cookies) headers.set("cookie", cookies);
 
   // The backend only trusts this when TRUSTED_PROXY_HOPS is configured for it.
@@ -52,13 +55,13 @@ function forwardedHeaders(request) {
   return headers;
 }
 
-export async function proxyToBackend(request, path, { method = request.method, body } = {}) {
+export async function proxyToBackend(request, path, { method = request.method, body, anonymous = false } = {}) {
   let response;
 
   try {
     response = await fetch(`${BACKEND_URL}${path}`, {
       method,
-      headers: forwardedHeaders(request),
+      headers: forwardedHeaders(request, anonymous),
       body,
       cache: "no-store",
       redirect: "manual",

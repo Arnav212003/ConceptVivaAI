@@ -1,0 +1,126 @@
+# Local, production-like stack:  docker compose up --build
+# Required in .env (next to this file): SESSION_SECRET_KEY, SANDBOX_SHARED_SECRET.
+# Optional: GEMINI_API_KEY, GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET.
+name: conceptviva
+
+x-backend-env: &backend-env
+  APP_ENV: ${APP_ENV:-development}
+  DATABASE_URL: postgresql+psycopg2://conceptviva:conceptviva@postgres:5432/conceptviva
+  REDIS_URL: redis://redis:6379/0
+  SESSION_SECRET_KEY: ${SESSION_SECRET_KEY:?Set SESSION_SECRET_KEY in .env}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+  FRONTEND_URL: http://localhost:3000
+  CORS_ORIGINS: http://localhost:3000
+  JUDGE_ENABLED: "true"
+  JUDGE_EXECUTOR: sandbox
+  SANDBOX_URL: http://sandbox:8090
+  SANDBOX_SHARED_SECRET: ${SANDBOX_SHARED_SECRET:?Set SANDBOX_SHARED_SECRET in .env}
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  OAUTH_REDIRECT_URI: http://localhost:3000/api/auth/google/callback
+  COOKIE_SECURE: "false"
+  # Requests arrive through the Next.js proxy, one hop.
+  TRUSTED_PROXY_HOPS: "1"
+  METRICS_TOKEN: ${METRICS_TOKEN:-}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: conceptviva
+      POSTGRES_PASSWORD: conceptviva
+      POSTGRES_DB: conceptviva
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conceptviva"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build: ./backend
+    environment: *backend-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: ./backend
+    environment: *backend-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build: ./backend
+    environment: *backend-env
+    command: ["python", "-m", "judge.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      sandbox:
+        condition: service_started
+    networks:
+      - default
+      - sandbox_net
+
+  # Untrusted code runs here and only here.
+  sandbox:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.sandbox
+    environment:
+      SANDBOX_SHARED_SECRET: ${SANDBOX_SHARED_SECRET:?Set SANDBOX_SHARED_SECRET in .env}
+      SANDBOX_CONCURRENCY: "2"
+    networks:
+      - sandbox_net            # internal-only: no route to the internet or to other services
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, KILL]   # only to drop submissions to uid 65534 and kill them
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 768m
+    cpus: 1.0
+
+  frontend:
+    build: .
+    environment:
+      PYTHON_BACKEND_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+networks:
+  sandbox_net:
+    internal: true
+
+volumes:
+  pgdata:

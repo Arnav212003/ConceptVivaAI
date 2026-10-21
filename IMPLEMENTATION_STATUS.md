@@ -101,4 +101,29 @@ Phase 5 tests: backend `python -m pytest` → 165 passed; `npm run lint` clean; 
 
 | Item | Status | Notes |
 |---|---|---|
-| Docker Compose, CI, README, analytics | TODO | |
+| Docker Compose | DONE (not run locally) | `docker-compose.yml`: postgres, redis, migrate, api, worker, hardened sandbox (internal network, read-only, cap_drop ALL + SETUID/SETGID/KILL, no-new-privileges, pids/mem/cpu limits), frontend. YAML parsed and checked locally; `docker compose config` and image builds run in CI because Docker is not installed here. |
+| Dockerfiles | DONE (built in CI) | `backend/Dockerfile` (non-root API/worker), `backend/Dockerfile.sandbox` (judge modules only, verified to import no app config), `Dockerfile` (Next standalone, non-root). |
+| Vercel / Render / Neon preparation | DONE | `render.yaml` blueprint (API with `alembic upgrade head` pre-deploy, judge worker, Key Value Redis, secrets as `sync: false`); Vercel needs only `PYTHON_BACKEND_URL`; Neon URL format documented. |
+| Production deployment | BLOCKED | Needs your Render/Vercel/Neon/Judge0 accounts and secrets; not performed. |
+| GitHub Actions | DONE (not yet run on GitHub) | Jobs: backend pytest + PostgreSQL migration up/down/up + offline benchmark; frontend lint + Vitest + build; Playwright E2E; Docker compose config + 3 image builds. |
+| README + Mermaid | DONE | Architecture flowchart and judge sequence diagram, features, highlights, setup, testing, security model, benchmark status, deployment steps, known limitations. |
+| Privacy-conscious analytics | DONE | Anonymous daily aggregates (`analytics_daily`, migration `0004`), allowlisted events/routes, DNT + GPC honored, no identity forwarded by the proxy; admin-token summary; per-user `/progress` (streak, weekly attempts and average) shown on the dashboard. |
+| `.env.example` | DONE | Every setting documented with dummy values. |
+| Judge runner hardening follow-up | DONE | Replaced `preexec_fn` (unsafe with threads) by `judge/limits_launcher.py` + Popen `process_group`/`user`/`group`. The Linux path runs in CI only. |
+| User database upgrade check | DONE | A copy of the pre-upgrade SQLite DB migrated 0001 → 0004 with the existing attempt intact. |
+
+Phase 6 tests: backend `python -m pytest` → 171 passed; `npm test` → 27 passed; `npm run lint` clean; `npm run build` OK; `npm run test:e2e` → 12 passed.
+
+## Remaining blockers (need you)
+
+1. Gemini API key approval for a live structured-output smoke test and the production benchmark run (billable).
+2. 100 human-labelled answers (2+ labelers) for the grader benchmark.
+3. Google Cloud OAuth client (ID, secret, redirect URI).
+4. Hosting accounts: Neon, Render, Vercel, and a Judge0 endpoint.
+5. First GitHub Actions run (push the `feature/project-improvements` branch / open a PR) to confirm the Linux judge path, Docker builds and Postgres migrations in CI.
+
+## TODO (nice to have)
+
+- More hidden tests per curated question (currently 3).
+- Move guest sessions from localStorage to cookies as well.
+- Production load test and real usage numbers.

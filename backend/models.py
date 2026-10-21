@@ -205,3 +205,20 @@ class GuestHistoryMigration(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     rows_moved = Column(Integer, default=0)
     migrated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AnalyticsDaily(Base):
+    """Privacy-conscious product analytics: daily aggregate counters only.
+
+    No user id, session id, IP address or user agent is stored, and `dimension`
+    only ever holds values from a server-side allowlist.
+    """
+
+    __tablename__ = "analytics_daily"
+    __table_args__ = (Index("ux_analytics_day_event_dim", "day", "event", "dimension", unique=True),)
+
+    id = Column(Integer, primary_key=True)
+    day = Column(String(10), nullable=False)  # YYYY-MM-DD (UTC)
+    event = Column(String(50), nullable=False)
+    dimension = Column(String(80), nullable=False, default="")
+    count = Column(Integer, nullable=False, default=0)

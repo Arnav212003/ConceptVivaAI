@@ -9,6 +9,7 @@ import useDsaWorkspace from "@/hooks/useDsaWorkspace";
 import useJudgeStatus from "@/hooks/useJudgeStatus";
 import useLocalHistory from "@/hooks/useLocalHistory";
 import useSolutionVoice from "@/hooks/useSolutionVoice";
+import { track } from "@/lib/analytics";
 import { DSA_TOPICS, difficultyStyle } from "@/lib/difficulty";
 
 export default function DSAPracticeCard() {
@@ -63,6 +64,7 @@ export default function DSAPracticeCard() {
     }
     const data = await workspace.submit({ topic: effectiveTopic, difficulty, mode: "Practice" });
     if (data) {
+      track("attempt_submitted", "dsa_practice");
       const today = new Date();
       history.add({
         date: today.toLocaleDateString(),
@@ -83,6 +85,7 @@ export default function DSAPracticeCard() {
     );
     if (!confirmed) return;
     const data = await workspace.revealSolution({ topic: effectiveTopic, difficulty });
+    if (data) track("solution_revealed", "dsa_practice");
     // Clicking "stuck" means they want it explained, so start speaking right away.
     if (data) setTimeout(() => voice.explain(data), 300);
   }

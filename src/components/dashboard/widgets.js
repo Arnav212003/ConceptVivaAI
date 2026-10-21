@@ -168,3 +168,43 @@ export function buildTopicReadiness(timeline) {
     .sort((a, b) => b.readiness - a.readiness)
     .slice(0, 10);
 }
+
+// Weekly activity bars from the user's own history (GET /api/progress).
+export function ProgressPanel({ progress }) {
+  if (!progress) return null;
+  const weeks = progress.weeks || [];
+  const peak = Math.max(1, ...weeks.map((week) => week.attempts));
+
+  return (
+    <SectionCard title="Your Progress">
+      <div className="mb-5 grid grid-cols-2 gap-4">
+        <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+          <p className="text-xs text-slate-400">Current streak</p>
+          <p className="mt-1 text-2xl font-bold text-white" data-testid="streak">
+            {progress.current_streak_days} day{progress.current_streak_days === 1 ? "" : "s"}
+          </p>
+        </div>
+        <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+          <p className="text-xs text-slate-400">Active days (last 30)</p>
+          <p className="mt-1 text-2xl font-bold text-white">{progress.active_days_last_30}</p>
+        </div>
+      </div>
+      <div className="flex h-40 items-end gap-2" role="img" aria-label="Attempts per week for the last 8 weeks">
+        {weeks.map((week) => (
+          <div key={week.week_start} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1">
+            <span className="text-[10px] text-slate-400">{week.attempts || ""}</span>
+            <div
+              className={`w-full rounded-t-md ${scoreTone(week.average_score).bar}`}
+              style={{ height: `${Math.max(4, (week.attempts / peak) * 100)}%` }}
+              title={`Week of ${week.week_start}: ${week.attempts} attempt(s), average ${formatScore(week.average_score)}`}
+            />
+            <span className="truncate text-[10px] text-slate-500">{week.week_start.slice(5)}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-slate-500">
+        Bar height = attempts per week; colour = that week's average score (scored attempts only).
+      </p>
+    </SectionCard>
+  );
+}
