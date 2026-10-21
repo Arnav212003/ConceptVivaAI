@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.sql import func
 
 from database import Base
@@ -161,3 +161,47 @@ class RevokedSession(Base):
     reason = Column(String(255), default="User logout")
 
     revoked_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    google_sub = Column(String(255), unique=True, index=True, nullable=False)
+    email = Column(String(320), default="")
+    name = Column(String(255), default="")
+    picture_url = Column(String(1000), default="")
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_login_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def owner_id(self) -> str:
+        """History rows are keyed by this id once the user signs in."""
+        return f"usr_{self.id}"
+
+
+class AuthSession(Base):
+    """Cookie-backed login session. Only a SHA-256 hash of the token is stored."""
+
+    __tablename__ = "auth_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    token_hash = Column(String(64), unique=True, index=True, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class GuestHistoryMigration(Base):
+    """One row per guest session merged into an account; makes migration idempotent."""
+
+    __tablename__ = "guest_history_migrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guest_session_id = Column(String(255), unique=True, index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    rows_moved = Column(Integer, default=0)
+    migrated_at = Column(DateTime(timezone=True), server_default=func.now())

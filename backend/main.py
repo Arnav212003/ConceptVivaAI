@@ -15,6 +15,7 @@ from observability import (
     log_event,
     metrics_response,
 )
+from routes.auth_routes import router as auth_router
 from routes.dashboard_routes import router as dashboard_router
 from routes.dsa_routes import router as dsa_router
 from routes.interview_routes import router as interview_router
@@ -52,6 +53,7 @@ app.add_middleware(
 )
 
 app.include_router(session_router)
+app.include_router(auth_router)
 app.include_router(dsa_router)
 app.include_router(interview_router)
 app.include_router(ml_router)

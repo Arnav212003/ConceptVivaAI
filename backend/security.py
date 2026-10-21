@@ -6,7 +6,7 @@ import secrets
 import time
 from typing import Optional
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -116,10 +116,22 @@ def revoke_session_token(
 
 
 def get_current_session_id(
+    request: Request,
     x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
     x_session_token: Optional[str] = Header(default=None, alias="X-Session-Token"),
     db: Session = Depends(get_db),
 ):
+    """Owner id for this request.
+
+    A valid sign-in cookie wins (returns `usr_<id>`, CSRF-checked). Otherwise the
+    guest HMAC session headers are used, exactly as before accounts existed.
+    """
+    from auth import resolve_cookie_owner
+
+    owner = resolve_cookie_owner(request, db)
+    if owner:
+        return owner
+
     if not x_session_id or not x_session_token:
         raise HTTPException(
             status_code=401,
