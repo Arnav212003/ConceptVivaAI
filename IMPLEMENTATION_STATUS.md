@@ -83,7 +83,19 @@ Phase 4 tests: `python -m pytest` → 146 passed.
 
 | Item | Status | Notes |
 |---|---|---|
-| Google OAuth, refactor, tests | TODO | |
+| Google OAuth | DONE | Authorization code + PKCE, state/nonce in a signed 10-minute HttpOnly cookie, server-side code exchange, ID token verified with `google-auth` (signature, audience, issuer, expiry, nonce, email_verified). Open-redirect-safe `return_to`. |
+| HttpOnly cookie sessions | DONE | `cv_auth` HttpOnly + SameSite=Lax (+ Secure in production); DB stores only SHA-256 token hashes; expiry and revocation on logout. Migration `0003_auth`. |
+| CSRF protection | DONE | HMAC-bound double-submit token (`cv_csrf` + `X-CSRF-Token`) and Origin allowlist on unsafe cookie-authenticated requests. A planted CSRF cookie is rejected (tested). |
+| Guest access + safe history migration | DONE | Guest HMAC sessions unchanged. `POST /auth/migrate-guest-history` needs a valid guest token and a CSRF-checked login; moves all history tables in one transaction, can run only once per guest session, then revokes the guest token. |
+| Component refactor + custom hooks | DONE | Shared hooks (`useDsaWorkspace`, `useSolutionVoice`, `useSpeechSynthesis`, `useSpeechRecognition`, `useLocalHistory`, `useJudgeStatus`) and components (`dsa/*`, `project/*`, `dashboard/widgets`, `ui/*`). Largest files: DSAPractice 1387→227 lines, Interview 998→500, DSAMock 925→200, Project 800→271, Dashboard 653→226. One shared Next proxy (`src/lib/backendProxy.js`) replaces 7 copies. |
+| Fixed during refactor | DONE | Stale-closure bug in voice-interview auto mode; scores of unavailable evaluations shown as 0/10; local averages counting failures as 0; raw error messages leaked by proxies; free-form "AI selected topic" instructions sent from the browser (now server-side `auto_topic`); `alert()` replaced by inline error states. |
+| Vitest component tests | DONE | `npm test` → 25 passed (scoring, hooks, CSRF header + retry rules, verdict/hidden tests, project file filter excludes `.env`, ML practice flows incl. unavailable and 429). |
+| Playwright E2E | DONE | `npm run test:e2e` → 12 passed (6 scenarios x desktop + mobile Chromium) against the production build with network-mocked APIs: navigation + no horizontal scroll, ML practice, DSA judge run + verified submit, judge-offline notice, dashboard error/retry + "Not scored", Google sign-in start. |
+| Real proxy ↔ backend smoke test | DONE | Next production server + FastAPI: session, auto-topic, unavailable evaluation saved without score, dashboard counts, 400 on unknown action, 503 when judge offline, OAuth 302 + HttpOnly state cookie relayed, forged callback state rejected, security headers present. |
+| Features preserved | DONE | ML practice, DSA practice (verified + AI), mock sets, project challenges, voice interviews, Hindi explanations, Monaco editor, dashboard, history. |
+| Live Google sign-in | BLOCKED | Needs a Google Cloud OAuth client (client id/secret + authorized redirect URI). Flow is tested with Google mocked. |
+
+Phase 5 tests: backend `python -m pytest` → 165 passed; `npm run lint` clean; `npm run build` OK; `npm test` → 25 passed; `npm run test:e2e` → 12 passed.
 
 ## Phase 6 — Deployment and documentation
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { averageScore, formatScore } from "@/lib/scoring";
 
 export default function DSAHistoryCard() {
   const [dsaHistory, setDsaHistory] = useState([]);
@@ -10,7 +11,11 @@ export default function DSAHistoryCard() {
     const savedHistory = localStorage.getItem("conceptviva_dsa_history");
 
     if (savedHistory) {
-      setDsaHistory(JSON.parse(savedHistory));
+      try {
+        setDsaHistory(JSON.parse(savedHistory));
+      } catch {
+        setDsaHistory([]);
+      }
     }
   }, []);
 
@@ -21,13 +26,8 @@ export default function DSAHistoryCard() {
 
   const totalAttempts = dsaHistory.length;
 
-  const averageScore =
-    totalAttempts > 0
-      ? (
-          dsaHistory.reduce((sum, item) => sum + Number(item.score || 0), 0) /
-          totalAttempts
-        ).toFixed(1)
-      : "0.0";
+  // Unscored attempts (AI unavailable) are excluded from the average.
+  const localAverage = formatScore(averageScore(dsaHistory));
 
   const todayDate = new Date().toLocaleDateString();
 
@@ -76,7 +76,7 @@ export default function DSAHistoryCard() {
         <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
           <p className="text-sm text-slate-400">Average Score</p>
           <p className="mt-1 text-3xl font-bold text-white">
-            {averageScore}/10
+            {localAverage}
           </p>
         </div>
 
@@ -150,7 +150,7 @@ export default function DSAHistoryCard() {
                       {item.difficulty}
                     </td>
                     <td className="py-3 pr-3 font-bold text-white">
-                      {item.score}/10
+                      {formatScore(item.score)}
                     </td>
                     <td className="py-3 pr-3">
                       <span

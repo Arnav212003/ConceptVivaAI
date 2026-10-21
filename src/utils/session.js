@@ -139,13 +139,32 @@ export async function ensureConceptVivaSession() {
   return createNewSessionShared();
 }
 
+// Signed-in users authenticate with an HttpOnly cookie. The backend additionally
+// requires this readable CSRF cookie to be echoed in a header on unsafe requests.
+export function getCsrfToken() {
+  if (typeof document === "undefined") return "";
+
+  const match = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("cv_csrf="));
+
+  return match ? decodeURIComponent(match.slice("cv_csrf=".length)) : "";
+}
+
 export async function getSessionHeaders() {
   const session = await ensureConceptVivaSession();
-
-  return {
+  const headers = {
     "X-Session-Id": session.sessionId,
     "X-Session-Token": session.sessionToken,
   };
+
+  const csrf = getCsrfToken();
+  if (csrf) {
+    headers["X-CSRF-Token"] = csrf;
+  }
+
+  return headers;
 }
 
 export async function apiFetchWithSessionRetry(url, options = {}) {
@@ -165,7 +184,13 @@ export async function apiFetchWithSessionRetry(url, options = {}) {
     return firstResponse;
   }
 
+  // A 403 caused by a CSRF/Origin problem is not fixed by a new guest session.
+  if (getCsrfToken() && firstResponse.status === 403) {
+    return firstResponse;
+  }
+
   const freshSession = await forceNewConceptVivaSession();
+  const csrf = getCsrfToken();
 
   return fetch(url, {
     ...options,
@@ -173,6 +198,7 @@ export async function apiFetchWithSessionRetry(url, options = {}) {
       ...originalHeaders,
       "X-Session-Id": freshSession.sessionId,
       "X-Session-Token": freshSession.sessionToken,
+      ...(csrf ? { "X-CSRF-Token": csrf } : {}),
     },
     cache: options.cache || "no-store",
   });

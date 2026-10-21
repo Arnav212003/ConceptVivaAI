@@ -34,3 +34,11 @@ backend/*.db
 
 # Logs and local runtime output
 *.log
+
+# Frontend test output
+/test-results/
+/playwright-report/
+/coverage/
+
+# Local backups of the SQLite database
+backend/backups/
