@@ -67,7 +67,17 @@ Phase 3 tests: `python -m pytest` → 132 passed.
 
 | Item | Status | Notes |
 |---|---|---|
-| Async LLM, resilience, Redis rate limiting, observability | TODO | |
+| Async Gemini calls | DONE | `client.aio.models.generate_content` behind `services/llm.py`; AI routes are `async def`; DB writes inside them go through `run_in_threadpool`. |
+| Timeouts, bounded retries, circuit breaker | DONE | `asyncio.wait_for` timeout, retries only for timeouts/429/5xx with exponential backoff + jitter, consecutive-failure breaker with half-open trial. Tested in `tests/test_llm_resilience.py`. |
+| Redis distributed rate limiting | DONE | `rate_limit.py`: sliding log in a sorted set inside MULTI/EXEC; rejected hits don't consume quota; shared across instances; falls back to the in-process limiter if Redis fails. Dashboard/history now limited too. |
+| Proxy-aware client IP | DONE | `TRUSTED_PROXY_HOPS` (Render/Railway = 1). Without it, every user behind the proxy shared one session-start limit. |
+| Structured logging, request IDs, metrics | DONE | JSON logs with request id and redaction (`observability.py`); `X-Request-ID` propagated; Prometheus `/metrics` (HTTP, LLM, breaker, judge, cache, rate-limit), token-protected with `METRICS_TOKEN`, hidden in production without one. A redaction bug (Bearer tokens) was found by tests and fixed. |
+| Safe caching | DONE | Hindi translations (7 days) and curated-bank problem statements (1 day) in Redis or memory, keyed by SHA-256. Evaluations and scores are never cached. |
+| Load tests | DONE | `loadtests/locustfile.py` (AI endpoints behind the `ai` tag). Local run: 50 users / 60 s, 2,258 requests, 0 failures, p95 54 ms, p99 100 ms; see `loadtests/RESULTS.md` for the environment and caveats. |
+| Production load test | BLOCKED | Needs the deployed environment. |
+| FastAPI / PostgreSQL / Alembic / frontend compatibility | DONE | Existing endpoints and response fields are kept; new fields are additive. |
+
+Phase 4 tests: `python -m pytest` → 146 passed.
 
 ## Phase 5 — Authentication and frontend
 

@@ -31,9 +31,17 @@ _SECRET_PATTERN = re.compile(
 )
 
 
+_BEARER_PATTERN = re.compile(r"\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
+
+
 def redact(text: str) -> str:
     """Mask values that look like credentials before they reach a log line."""
-    return _SECRET_PATTERN.sub(lambda m: f"{m.group(1)}{m.group(2)}[REDACTED]", text)
+    text = _BEARER_PATTERN.sub(lambda m: f"{m.group(1)} [REDACTED]", text)
+    return _SECRET_PATTERN.sub(
+        lambda m: m.group(0) if m.group(3).startswith("[REDACTED") or m.group(3).lower() in ("bearer", "basic")
+        else f"{m.group(1)}{m.group(2)}[REDACTED]",
+        text,
+    )
 
 
 class JsonFormatter(logging.Formatter):
