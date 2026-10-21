@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from crud import (
@@ -15,7 +16,9 @@ from schemas import (
 )
 from security import create_evaluation_receipt, get_current_session_id
 from serializers import serialize_project_attempt
+from services.grading.evaluators import STATUS_COMPLETED
 from services.project_service import (
+    AUTO_PROJECT_TOPICS,
     build_full_source_bundle,
     build_project_submission_manifest,
     evaluate_project_submission_with_gemini,
@@ -26,27 +29,34 @@ from services.project_service import (
 
 router = APIRouter(tags=["project"])
 
+MAX_PROJECT_SOURCE_CHARS = 2_200_000
+
 
 @router.post("/generate-project-challenge")
-def generate_project_challenge(
+async def generate_project_challenge(
     request: ProjectChallengeRequest,
     http_request: Request,
     session_id: str = Depends(get_current_session_id),
     db: Session = Depends(get_db),
 ):
     enforce_rate_limit(http_request, bucket="ai", session_id=session_id)
-    challenge = generate_project_challenge_with_gemini(
+    topic = request.topic
+    if request.auto_topic or not topic.strip():
+        topic = "AI selected: " + AUTO_PROJECT_TOPICS.get(request.domain, "a useful practical project")
+
+    challenge = await generate_project_challenge_with_gemini(
         domain=request.domain,
-        topic=request.topic,
+        topic=topic,
         difficulty=request.difficulty,
     )
 
-    stored_challenge = create_project_challenge(
+    stored_challenge = await run_in_threadpool(
+        create_project_challenge,
         db,
         {
             "session_id": session_id,
             "domain": request.domain,
-            "topic": request.topic,
+            "topic": topic[:255],
             "difficulty": request.difficulty,
             "project_title": challenge.get("project_title", "Project Challenge"),
             "challenge": challenge,
@@ -62,17 +72,15 @@ def generate_project_challenge(
 
 
 @router.post("/evaluate-project-submission")
-def evaluate_project_submission(
+async def evaluate_project_submission(
     request: ProjectSubmissionRequest,
     http_request: Request,
     session_id: str = Depends(get_current_session_id),
     db: Session = Depends(get_db),
 ):
     enforce_rate_limit(http_request, bucket="ai", session_id=session_id)
-    stored_challenge = get_project_challenge_by_id(
-        db,
-        session_id=session_id,
-        challenge_id=request.challenge_id,
+    stored_challenge = await run_in_threadpool(
+        get_project_challenge_by_id, db, session_id, request.challenge_id
     )
 
     if not stored_challenge:
@@ -85,14 +93,14 @@ def evaluate_project_submission(
         raise HTTPException(status_code=400, detail="Submit the complete project source folder before evaluation.")
 
     total_source_chars = sum(len(item.get("content", "")) for item in project_files)
-    if total_source_chars > 2_200_000:
+    if total_source_chars > MAX_PROJECT_SOURCE_CHARS:
         raise HTTPException(
             status_code=413,
             detail="Readable project source is too large. Keep source files under 2.2 million characters after excluding dependencies/build output.",
         )
 
     review = normalize_project_review(
-        evaluate_project_submission_with_gemini(
+        await evaluate_project_submission_with_gemini(
             domain=stored_challenge.domain,
             topic=stored_challenge.topic,
             difficulty=stored_challenge.difficulty,
@@ -111,24 +119,28 @@ def evaluate_project_submission(
     else:
         stored_submission = request.submission
 
-    attempt = save_verified_project_attempt(
-        db, session_id, stored_challenge, challenge, stored_submission, review
+    attempt = await run_in_threadpool(
+        save_verified_project_attempt, db, session_id, stored_challenge, challenge, stored_submission, review
     )
     review["challenge_id"] = stored_challenge.challenge_id
     review["verified_challenge"] = True
     review["saved_attempt"] = serialize_project_attempt(attempt)
-    review["evaluation_receipt"] = create_evaluation_receipt(
-        session_id=session_id,
-        kind="project_attempt",
-        score=review["score"],
-        verdict=review["verdict"],
-        metadata={"challenge_id": stored_challenge.challenge_id},
+    review["evaluation_receipt"] = (
+        create_evaluation_receipt(
+            session_id=session_id,
+            kind="project_attempt",
+            score=review["score"],
+            verdict=review["verdict"],
+            metadata={"challenge_id": stored_challenge.challenge_id},
+        )
+        if review["evaluation_status"] == STATUS_COMPLETED
+        else ""
     )
     return review
 
 
 @router.post("/save-project-attempt")
-def save_project_attempt(
+async def save_project_attempt(
     request: SaveProjectAttemptRequest,
     http_request: Request,
     session_id: str = Depends(get_current_session_id),
@@ -139,17 +151,15 @@ def save_project_attempt(
     if not request.challenge_id:
         raise HTTPException(status_code=400, detail="challenge_id is required for verified project saving.")
 
-    stored_challenge = get_project_challenge_by_id(
-        db,
-        session_id=session_id,
-        challenge_id=request.challenge_id,
+    stored_challenge = await run_in_threadpool(
+        get_project_challenge_by_id, db, session_id, request.challenge_id
     )
     if not stored_challenge:
         raise HTTPException(status_code=404, detail="Active project challenge not found for this session.")
 
     challenge = decode_project_challenge(stored_challenge.challenge_json)
     review = normalize_project_review(
-        evaluate_project_submission_with_gemini(
+        await evaluate_project_submission_with_gemini(
             domain=stored_challenge.domain,
             topic=stored_challenge.topic,
             difficulty=stored_challenge.difficulty,
@@ -157,11 +167,12 @@ def save_project_attempt(
             submission=request.submission,
         )
     )
-    attempt = save_verified_project_attempt(
-        db, session_id, stored_challenge, challenge, request.submission, review
+    attempt = await run_in_threadpool(
+        save_verified_project_attempt, db, session_id, stored_challenge, challenge, request.submission, review
     )
     return {
         "message": "Project attempt re-evaluated and saved by backend.",
         "verified_challenge": True,
+        "evaluation_status": review["evaluation_status"],
         "attempt": serialize_project_attempt(attempt),
     }

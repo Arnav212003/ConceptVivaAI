@@ -2,37 +2,20 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import secrets
 import time
-from pathlib import Path
 from typing import Optional
 
-from dotenv import load_dotenv
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from config import settings
 from database import get_db
 from models import RevokedSession
 
 
-BASE_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = BASE_DIR.parent
-
-load_dotenv(PROJECT_ROOT / ".env.local")
-load_dotenv(BASE_DIR / ".env")
-
-
-SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY")
-
-if not SESSION_SECRET_KEY:
-    raise RuntimeError(
-        "SESSION_SECRET_KEY is missing. Add SESSION_SECRET_KEY in .env.local before running backend."
-    )
-
-SESSION_TTL_SECONDS = int(
-    os.getenv("SESSION_TTL_SECONDS", str(60 * 60 * 24 * 30))
-)
+SESSION_SECRET_KEY = settings.session_secret_key
+SESSION_TTL_SECONDS = settings.session_ttl_seconds
 
 
 def _sign_message(message: str) -> str:
@@ -133,10 +116,22 @@ def revoke_session_token(
 
 
 def get_current_session_id(
+    request: Request,
     x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
     x_session_token: Optional[str] = Header(default=None, alias="X-Session-Token"),
     db: Session = Depends(get_db),
 ):
+    """Owner id for this request.
+
+    A valid sign-in cookie wins (returns `usr_<id>`, CSRF-checked). Otherwise the
+    guest HMAC session headers are used, exactly as before accounts existed.
+    """
+    from auth import resolve_cookie_owner
+
+    owner = resolve_cookie_owner(request, db)
+    if owner:
+        return owner
+
     if not x_session_id or not x_session_token:
         raise HTTPException(
             status_code=401,
@@ -166,9 +161,7 @@ def get_current_session_id(
 
     return x_session_id
 
-EVALUATION_RECEIPT_TTL_SECONDS = int(
-    os.getenv("EVALUATION_RECEIPT_TTL_SECONDS", str(60 * 60 * 6))
-)
+EVALUATION_RECEIPT_TTL_SECONDS = settings.evaluation_receipt_ttl_seconds
 
 
 def _b64url_encode(raw: bytes) -> str:

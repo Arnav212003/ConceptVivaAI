@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from crud import get_dashboard_stats, get_user_history
 from database import get_db
+from rate_limit import enforce_rate_limit
 from security import get_current_session_id
 from serializers import (
     serialize_dsa_attempt,
@@ -16,19 +17,23 @@ router = APIRouter(tags=["dashboard"])
 
 @router.get("/dashboard-stats")
 def dashboard_stats(
+    http_request: Request,
     session_id: str = Depends(get_current_session_id),
     db: Session = Depends(get_db)
 ):
+    enforce_rate_limit(http_request, bucket="general", session_id=session_id)
     return get_dashboard_stats(db, session_id)
 
 
 @router.get("/history")
 def history(
+    http_request: Request,
     limit: int = 20,
     offset: int = 0,
     session_id: str = Depends(get_current_session_id),
     db: Session = Depends(get_db)
 ):
+    enforce_rate_limit(http_request, bucket="general", session_id=session_id)
     history_data = get_user_history(db, session_id, limit=limit, offset=offset)
 
     return {

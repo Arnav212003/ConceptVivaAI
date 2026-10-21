@@ -1,10 +1,17 @@
 """Project challenge generation and review helpers."""
-import json
-
-from config import GEMINI_API_KEY
 from crud import create_project_attempt, mark_project_challenge_completed
-from services.gemini_client import client
-from utils import extract_json
+from services import llm
+from services.grading import safety
+from services.grading.evaluators import STATUS_COMPLETED, review_project, verdict_for
+from services.grading.prompts import PROJECT_CHALLENGE
+from services.grading.schemas import ProjectChallengeOutput
+
+AUTO_PROJECT_TOPICS = {
+    "Machine Learning": "a useful beginner ML project such as KNN, clustering, regression, classification or model evaluation",
+    "Data Analytics": "a useful analytics project such as a sales dashboard, churn analysis or KPI analysis",
+    "DSA": "a useful DSA project such as a path-finding visualizer, sorting visualizer or graph traversal tool",
+    "System Design": "a useful system design project such as a URL shortener, rate limiter, notification system or chat system",
+}
 
 
 def get_fallback_project_challenge(domain, topic, difficulty):
@@ -51,96 +58,40 @@ def get_fallback_project_challenge(domain, topic, difficulty):
             "Evaluation metric",
             "Conclusion",
         ],
+        "generated_by": "fallback",
     }
 
 
-def generate_project_challenge_with_gemini(domain, topic, difficulty):
-    if not GEMINI_API_KEY or not client:
-        return get_fallback_project_challenge(domain, topic, difficulty)
-
-    prompt = f"""
-You are ConceptVivaAI, an AI assessment platform.
-
-Generate a project-based challenge for a student.
-
-Domain: {domain}
-Topic: {topic}
-Difficulty: {difficulty}
-
-The challenge should be practical, beginner-friendly if difficulty is Beginner,
-and should feel like a mini hackathon/project assignment.
-
-Return only valid JSON in this exact format:
-{{
-  "project_title": "clear project title",
-  "domain": "{domain}",
-  "topic": "{topic}",
-  "difficulty": "{difficulty}",
-  "problem_statement": "detailed but simple problem statement",
-  "dataset_columns": [
-    {{
-      "column": "column_name",
-      "description": "what this column means"
-    }}
-  ],
-  "tasks": [
-    "task 1",
-    "task 2",
-    "task 3"
-  ],
-  "evaluation_metrics": [
-    "metric or evaluation point 1",
-    "metric or evaluation point 2"
-  ],
-  "hints": [
-    "hint 1",
-    "hint 2"
-  ],
-  "submission_checklist": [
-    "checklist item 1",
-    "checklist item 2"
-  ]
-}}
-
-Rules:
-1. Stay strictly inside the selected topic.
-2. Do not give the full solution.
-3. Do not provide complete code.
-4. Give a dataset/table schema.
-5. Make it useful for portfolio/project practice.
-6. Keep it clear for students.
-"""
-
+async def generate_project_challenge_with_gemini(domain, topic, difficulty):
+    boundary = safety.new_boundary()
+    prompt = "\n\n".join([
+        f"Difficulty: {difficulty}",
+        "Domain:\n" + safety.wrap_untrusted("domain", domain, boundary),
+        "Topic:\n" + safety.wrap_untrusted("topic", topic, boundary),
+    ])
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt
+        output = await llm.generate_structured(
+            "project_challenge",
+            system_instruction=PROJECT_CHALLENGE.system_instruction,
+            prompt=prompt,
+            schema=ProjectChallengeOutput,
+            temperature=0.7,
         )
-
-        result = extract_json(response.text)
-
-        if not result:
-            return get_fallback_project_challenge(domain, topic, difficulty)
-
-        result.setdefault("project_title", f"{topic} Mini Project Challenge")
-        result.setdefault("domain", domain)
-        result.setdefault("topic", topic)
-        result.setdefault("difficulty", difficulty)
-        result.setdefault("problem_statement", "Project problem statement not available.")
-        result.setdefault("dataset_columns", [])
-        result.setdefault("tasks", [])
-        result.setdefault("evaluation_metrics", [])
-        result.setdefault("hints", [])
-        result.setdefault("submission_checklist", [])
-
-        return result
-
-    except Exception:
+    except llm.LLMUnavailableError:
         return get_fallback_project_challenge(domain, topic, difficulty)
+
+    return {
+        **output.model_dump(),
+        "dataset_columns": [column.model_dump() for column in output.dataset_columns],
+        "domain": domain,
+        "topic": topic,
+        "difficulty": difficulty,
+        "generated_by": "ai",
+    }
 
 
 def _project_file_bundle(project_files):
-    """Create a file-by-file source bundle for Gemini and history."""
+    """Create a file-by-file source bundle for review and history."""
     sections = []
     for item in project_files or []:
         path = str(item.get("path", "")).strip()
@@ -169,7 +120,7 @@ def build_project_submission_manifest(project_files, project_notes=""):
     return "\n".join(lines)
 
 
-def evaluate_project_submission_with_gemini(
+async def evaluate_project_submission_with_gemini(
     domain,
     topic,
     difficulty,
@@ -184,8 +135,10 @@ def evaluate_project_submission_with_gemini(
     file_count = len(project_files)
 
     if not source_for_review.strip():
+        # An empty submission is a real (deterministic) zero, not an AI outage.
         return {
-            "score": 0,
+            "evaluation_status": STATUS_COMPLETED,
+            "score": 0.0,
             "verdict": "WEAK",
             "feedback": "No project source code was submitted.",
             "missing_points": "Submit the complete readable project source folder before evaluation.",
@@ -198,169 +151,51 @@ def evaluate_project_submission_with_gemini(
             "security_issues": [],
             "missing_requirements": [],
             "files_reviewed": 0,
+            "rubric": {},
+            "integrity_flags": [],
+            "prompt_version": "deterministic@empty_submission",
+            "model": "none",
         }
 
-    if not GEMINI_API_KEY or not client:
-        return {
-            "score": 6,
-            "verdict": "PARTIAL",
-            "feedback": f"Your full project submission ({file_count or 1} source unit(s)) was received. Gemini API is unavailable right now, so detailed code review could not run.",
-            "missing_points": "Detailed cross-file AI review is unavailable until Gemini is configured.",
-            "improved_approach": "Configure Gemini, then resubmit the complete source folder for file-by-file and cross-file analysis.",
-            "next_steps": "Set GEMINI_API_KEY and retry the project review.",
-            "suggested_resources": [],
-            "architecture_review": "Could not evaluate architecture without Gemini.",
-            "file_findings": [],
-            "bugs": [],
-            "security_issues": [],
-            "missing_requirements": [],
-            "files_reviewed": file_count,
-        }
-
-    prompt = f"""
-You are ConceptVivaAI, a strict senior software engineer and project evaluator.
-
-Evaluate the student's COMPLETE project source submission against the assigned challenge.
-Do a real cross-file code review, not a generic project-description review.
-
-Domain:
-{domain}
-
-Topic:
-{topic}
-
-Difficulty:
-{difficulty}
-
-Project Challenge:
-{json.dumps(challenge, indent=2)}
-
-Student Notes:
-{project_notes or "No additional notes."}
-
-Complete Project Source ({file_count if file_count else "legacy text submission"}):
-{source_for_review}
-
-Review requirements:
-1. Check whether the implementation actually satisfies the project challenge.
-2. Understand the project structure and how files/modules connect.
-3. Point out concrete bugs and incorrect logic, naming the exact file whenever possible.
-4. Check missing requirements, incomplete features, dead code, error handling and edge cases.
-5. Check architecture, APIs, database/data flow, model pipeline or algorithm choices where relevant.
-6. Check security and unsafe patterns where relevant. Do not invent vulnerabilities.
-7. Distinguish build/runtime blockers from minor improvements.
-8. Give actionable fixes, but do not rewrite the student's whole project.
-9. Base the score on submitted code, not on how polished the explanation sounds.
-
-Return only valid JSON in this exact shape:
-{{
-  "score": 0,
-  "verdict": "STRONG or PARTIAL or WEAK",
-  "feedback": "overall conclusion grounded in the submitted code",
-  "architecture_review": "how the project is structured and whether the design is appropriate",
-  "file_findings": [
-    {{
-      "file": "relative/path/to/file",
-      "status": "GOOD or ISSUE or REVIEW",
-      "issues": ["specific issue"],
-      "suggestions": ["specific improvement"]
-    }}
-  ],
-  "bugs": [
-    {{
-      "severity": "CRITICAL or HIGH or MEDIUM or LOW",
-      "file": "relative/path/to/file",
-      "issue": "what is wrong",
-      "fix": "how to fix it"
-    }}
-  ],
-  "security_issues": [
-    {{
-      "severity": "HIGH or MEDIUM or LOW",
-      "file": "relative/path/to/file",
-      "issue": "security issue",
-      "fix": "safe fix"
-    }}
-  ],
-  "missing_requirements": ["challenge requirement that is missing or incomplete"],
-  "missing_points": "short summary of the most important missing technical points",
-  "improved_approach": "recommended architecture/implementation improvements in priority order",
-  "next_steps": "what the student should fix next",
-  "suggested_resources": ["topic/resource to revise"]
-}}
-
-Scoring guide:
-0-2: empty, unrelated, or fundamentally non-working submission.
-3-4: major parts missing or core implementation is incorrect.
-5-6: basic implementation exists but important requirements/bugs remain.
-7-8: good working project with limited issues or missing polish.
-9-10: strong, complete, technically sound, portfolio-ready implementation.
-"""
-
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-        )
-        result = extract_json(response.text)
-        if not result:
-            raise ValueError("Gemini did not return valid project-review JSON")
-
-        result.setdefault("score", 6)
-        result.setdefault("verdict", "PARTIAL")
-        result.setdefault("feedback", "Project source reviewed.")
-        result.setdefault("architecture_review", "Architecture review not provided.")
-        result.setdefault("file_findings", [])
-        result.setdefault("bugs", [])
-        result.setdefault("security_issues", [])
-        result.setdefault("missing_requirements", [])
-        result.setdefault("missing_points", "No additional missing points provided.")
-        result.setdefault("improved_approach", "Keep the implementation modular and test the complete flow.")
-        result.setdefault("next_steps", "Fix the highest-severity findings and resubmit.")
-        result.setdefault("suggested_resources", [])
-        result["files_reviewed"] = file_count
-        return result
-    except Exception:
-        return {
-            "score": 6,
-            "verdict": "PARTIAL",
-            "feedback": "Gemini could not complete the full source-code review on this request.",
-            "missing_points": "Detailed file-level findings could not be generated.",
-            "improved_approach": "Verify Gemini configuration and resubmit the complete source folder.",
-            "next_steps": "Retry the review after checking the backend/Gemini connection.",
-            "suggested_resources": [],
-            "architecture_review": "Could not complete architecture review.",
-            "file_findings": [],
-            "bugs": [],
-            "security_issues": [],
-            "missing_requirements": [],
-            "files_reviewed": file_count,
-        }
+    return await review_project(
+        domain=domain,
+        topic=topic,
+        difficulty=difficulty,
+        challenge=challenge,
+        source=source_for_review,
+        file_count=file_count,
+        project_notes=project_notes,
+    )
 
 
 def normalize_project_review(review):
+    """Fill display defaults. Unavailable reviews keep score None."""
     review = dict(review or {})
-    try:
-        score = max(0.0, min(10.0, float(review.get("score", 5))))
-    except Exception:
-        score = 5.0
-    review["score"] = score
-    review["verdict"] = "STRONG" if score >= 8 else ("PARTIAL" if score >= 5 else "WEAK")
+    if review.get("evaluation_status") == STATUS_COMPLETED and review.get("score") is not None:
+        score = max(0.0, min(10.0, float(review["score"])))
+        review["score"] = score
+        review["verdict"] = verdict_for(score)
+    else:
+        review["evaluation_status"] = review.get("evaluation_status") or "unavailable"
+        review["score"] = None
+        review["verdict"] = "UNAVAILABLE"
     review.setdefault("feedback", "Project review completed.")
-    review.setdefault("missing_points", "Add clearer technical details and evaluation evidence.")
-    review.setdefault("improved_approach", "Use a structured problem-to-evaluation workflow.")
-    review.setdefault("next_steps", "Improve the weak areas and resubmit.")
+    review.setdefault("missing_points", "")
+    review.setdefault("improved_approach", "")
+    review.setdefault("next_steps", "")
     review.setdefault("suggested_resources", [])
-    review.setdefault("architecture_review", "Architecture review not provided.")
+    review.setdefault("architecture_review", "")
     review.setdefault("file_findings", [])
     review.setdefault("bugs", [])
     review.setdefault("security_issues", [])
     review.setdefault("missing_requirements", [])
     review.setdefault("files_reviewed", 0)
+    review.setdefault("integrity_flags", [])
     return review
 
 
 def save_verified_project_attempt(db, session_id, stored_challenge, challenge, submission, review):
+    completed = review.get("evaluation_status") == STATUS_COMPLETED
     attempt = create_project_attempt(
         db,
         {
@@ -372,8 +207,8 @@ def save_verified_project_attempt(db, session_id, stored_challenge, challenge, s
             "project_title": stored_challenge.project_title,
             "challenge": challenge,
             "submission": submission,
-            "score": review.get("score", 0),
-            "verdict": review.get("verdict", "PARTIAL"),
+            "score": review.get("score"),
+            "verdict": review.get("verdict", "UNAVAILABLE"),
             "feedback": review.get("feedback", ""),
             "missing_points": review.get("missing_points", ""),
             "improved_approach": review.get("improved_approach", ""),
@@ -384,11 +219,18 @@ def save_verified_project_attempt(db, session_id, stored_challenge, challenge, s
             "security_issues": review.get("security_issues", []),
             "missing_requirements": review.get("missing_requirements", []),
             "files_reviewed": review.get("files_reviewed", 0),
+            "evaluation_status": review.get("evaluation_status", "unavailable"),
+            "prompt_version": review.get("prompt_version", ""),
+            "model_name": review.get("model", ""),
+            "integrity_flags": review.get("integrity_flags", []),
         },
     )
-    mark_project_challenge_completed(
-        db,
-        session_id=session_id,
-        challenge_id=stored_challenge.challenge_id,
-    )
+    # Only a completed review consumes the challenge; after an outage the student
+    # can resubmit the same challenge.
+    if completed:
+        mark_project_challenge_completed(
+            db,
+            session_id=session_id,
+            challenge_id=stored_challenge.challenge_id,
+        )
     return attempt

@@ -1,699 +1,303 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import ResultCard from "./ResultCard";
-import {
-  apiFetchWithSessionRetry,
-  ensureConceptVivaSession,
-} from "@/utils/session";
+import LocalHistoryTable from "@/components/LocalHistoryTable";
+import ResultCard from "@/components/ResultCard";
+import { ErrorBanner, LoadingState, StatCard } from "@/components/ui";
+import useLocalHistory from "@/hooks/useLocalHistory";
+import useSpeechRecognition from "@/hooks/useSpeechRecognition";
+import useSpeechSynthesis from "@/hooks/useSpeechSynthesis";
+import { track } from "@/lib/analytics";
+import { apiPost } from "@/lib/api";
+import { averageScore, formatScore, isScored } from "@/lib/scoring";
+
+const MAX_ROUNDS = 5;
+const AUTO_TOPIC_LABEL = "AI Selected Topic";
+const REVISION_KEY = "conceptviva_interview_revision";
+
+function readRevisionQueue() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(REVISION_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function summary(avg) {
+  if (avg >= 8) {
+    return {
+      strongPoints: "Concept clarity, confidence, and answer structure look strong.",
+      weakPoints: "Add more real-world examples and edge-case explanations to make answers stronger.",
+      recommendation: "Strong interview performance. You are close to interview-ready for this topic.",
+    };
+  }
+  if (avg >= 6) {
+    return {
+      strongPoints: "Basic understanding is present and you are able to attempt the questions.",
+      weakPoints: "Improve depth, examples, interview keywords, and step-by-step explanation.",
+      recommendation: "Good base is present, but answers need more structure, examples, and technical depth.",
+    };
+  }
+  return {
+    strongPoints: "You are practicing consistently, which is the first strong point.",
+    weakPoints: "Revise definitions, working, examples, advantages, limitations, and common interview questions.",
+    recommendation: "Needs focused revision. First revise core concepts, then practice short structured answers.",
+  };
+}
 
 export default function InterviewCard() {
   const [topic, setTopic] = useState("");
-  const [activeTopic, setActiveTopic] = useState("AI Selected Topic");
+  const [activeTopic, setActiveTopic] = useState(AUTO_TOPIC_LABEL);
   const [level, setLevel] = useState("Easy");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState(null);
   const [loadingQuestion, setLoadingQuestion] = useState(false);
   const [loadingEvaluation, setLoadingEvaluation] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [autoMode, setAutoMode] = useState(false);
   const [round, setRound] = useState(0);
-  const [interviewScores, setInterviewScores] = useState([]);
-  const [interviewHistory, setInterviewHistory] = useState([]);
+  const [rounds, setRounds] = useState([]);
   const [finalReport, setFinalReport] = useState(null);
   const [revisionQueue, setRevisionQueue] = useState([]);
-  const [followUpUsed, setFollowUpUsed] = useState(false);
+  const [error, setError] = useState("");
 
-  const recognitionRef = useRef(null);
-  const keepListeningRef = useRef(false);
-  const transcriptRef = useRef("");
-  const maxRounds = 5;
+  // Refs avoid stale state inside speech callbacks that fire seconds later.
+  const autoModeRef = useRef(false);
+  const followUpUsedRef = useRef(false);
+  const [autoMode, setAutoModeState] = useState(false);
+
+  const history = useLocalHistory("conceptviva_interview_history");
+  const speech = useSpeechSynthesis();
+  const mic = useSpeechRecognition({ onTranscript: setAnswer });
 
   useEffect(() => {
-    const savedHistory = localStorage.getItem("conceptviva_interview_history");
-
-    if (savedHistory) {
-      setInterviewHistory(JSON.parse(savedHistory));
-    }
-
-    const savedRevision = localStorage.getItem("conceptviva_interview_revision");
-    if (savedRevision) {
-      try {
-        setRevisionQueue(JSON.parse(savedRevision));
-      } catch (error) {
-        setRevisionQueue([]);
-      }
-    }
+    setRevisionQueue(readRevisionQueue());
   }, []);
 
-  // stop the mic and any ongoing speech if the user navigates away mid-interview,
-  // otherwise recognition/synthesis can keep running in the background
-  useEffect(() => {
-    return () => {
-      keepListeningRef.current = false;
-
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch (error) {}
-      }
-
-      if (typeof window !== "undefined") {
-        window.speechSynthesis.cancel();
-      }
-    };
-  }, []);
-
-  function getTopicForDisplay() {
-    const cleanTopic = topic.trim();
-
-    if (cleanTopic) {
-      return cleanTopic;
-    }
-
-    return "AI Selected Topic";
+  function setAutoMode(value) {
+    autoModeRef.current = value;
+    setAutoModeState(value);
   }
 
-  function getTopicForRequest() {
-    const cleanTopic = topic.trim();
-
-    if (cleanTopic) {
-      return cleanTopic;
-    }
-
-    const revisionText = revisionQueue.length
-      ? `\nStart by prioritizing these revision items from previous weak answers:\n${revisionQueue
-          .slice(0, 5)
-          .map((item, index) => `${index + 1}. ${item.topic}: ${item.question}`)
-          .join("\n")}\n`
-      : "";
-
-    return `
-AI mock interview practice.
-${revisionText}
-The user did not select a fixed topic.
-Choose one useful interview topic yourself from:
-- Machine Learning basics
-- Linear Regression
-- Logistic Regression
-- KNN
-- Clustering
-- Overfitting and Underfitting
-- Bias Variance Tradeoff
-- Model Evaluation Metrics
-- DSA Arrays
-- DSA Strings
-- Binary Search
-- Graphs
-- System Design basics
-- URL Shortener
-- Rate Limiter
-- Caching
-- Load Balancing
-- Database Design
-
-Ask only one clear interview question.
-Do not reveal the answer.
-`;
-  }
-
-  function getSpeechRecognition() {
-    if (typeof window === "undefined") return null;
-
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) return null;
-
-    return new SpeechRecognition();
-  }
-
-  function speakText(text, afterSpeak) {
-    if (typeof window === "undefined") return;
-
-    window.speechSynthesis.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "en-US";
-    utterance.rate = 0.95;
-    utterance.pitch = 1;
-
-    utterance.onstart = () => {
-      setIsSpeaking(true);
-    };
-
-    utterance.onend = () => {
-      setIsSpeaking(false);
-
-      if (afterSpeak) {
-        afterSpeak();
-      }
-    };
-
-    window.speechSynthesis.speak(utterance);
-  }
-
-  function stopSpeaking() {
-    if (typeof window !== "undefined") {
-      window.speechSynthesis.cancel();
-    }
-
-    setIsSpeaking(false);
-  }
-
-  function startListening() {
-    const recognition = getSpeechRecognition();
-
-    if (!recognition) {
-      alert("Speech recognition is not supported in this browser. Use Chrome or Edge.");
-      return;
-    }
-
-    stopSpeaking();
-
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (error) {}
-    }
-
-    keepListeningRef.current = true;
-    transcriptRef.current = answer ? `${answer.trim()} ` : "";
-
-    recognitionRef.current = recognition;
-
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = "en-US";
-
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
-
-    recognition.onresult = (event) => {
-      let finalText = "";
-      let interimText = "";
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const spokenText = event.results[i][0].transcript;
-
-        if (event.results[i].isFinal) {
-          finalText += `${spokenText} `;
-        } else {
-          interimText += spokenText;
-        }
-      }
-
-      if (finalText.trim()) {
-        transcriptRef.current += finalText;
-      }
-
-      setAnswer((transcriptRef.current + interimText).trim());
-    };
-
-    recognition.onerror = (event) => {
-      console.log("Speech recognition error:", event.error);
-
-      if (
-        event.error === "not-allowed" ||
-        event.error === "service-not-allowed"
-      ) {
-        keepListeningRef.current = false;
-        setIsListening(false);
-        alert("Microphone permission is blocked. Please allow microphone permission.");
-      }
-    };
-
-    recognition.onend = () => {
-      if (keepListeningRef.current) {
-        setTimeout(() => {
-          try {
-            recognition.start();
-          } catch (error) {}
-        }, 300);
-      } else {
-        setIsListening(false);
-      }
-    };
-
+  function persistRevision(updated) {
+    setRevisionQueue(updated);
     try {
-      recognition.start();
-    } catch (error) {
-      console.log("Mic start error:", error);
+      window.localStorage.setItem(REVISION_KEY, JSON.stringify(updated));
+    } catch {
+      // ignore storage failures
     }
-  }
-
-  function stopListening() {
-    keepListeningRef.current = false;
-
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (error) {}
-    }
-
-    setIsListening(false);
-  }
-
-  function resetInterview() {
-    stopSpeaking();
-    stopListening();
-
-    setQuestion("");
-    setAnswer("");
-    setResult(null);
-    setRound(0);
-    setInterviewScores([]);
-    setFinalReport(null);
-    setFollowUpUsed(false);
-    setAutoMode(false);
-    setActiveTopic(getTopicForDisplay());
   }
 
   function addRevisionItem(item) {
-    setRevisionQueue((current) => {
-      const key = `${item.topic}|${item.question}`;
-      const withoutDuplicate = current.filter(
-        (entry) => `${entry.topic}|${entry.question}` !== key
-      );
-      const updated = [item, ...withoutDuplicate].slice(0, 20);
-      localStorage.setItem(
-        "conceptviva_interview_revision",
-        JSON.stringify(updated)
-      );
-      return updated;
+    const key = `${item.topic}|${item.question}`;
+    persistRevision([item, ...revisionQueue.filter((entry) => `${entry.topic}|${entry.question}` !== key)].slice(0, 20));
+  }
+
+  function askQuestion(text) {
+    setQuestion(text);
+    setRound((prev) => prev + 1);
+    speech.speak(text, {
+      onEnd: () => {
+        if (autoModeRef.current) mic.start("");
+      },
     });
   }
 
-  function clearRevisionQueue() {
-    setRevisionQueue([]);
-    localStorage.removeItem("conceptviva_interview_revision");
-  }
-
-  function getAverageScore(scores) {
-    if (!scores.length) return 0;
-
-    const total = scores.reduce((sum, item) => sum + Number(item.score || 0), 0);
-    return Number((total / scores.length).toFixed(1));
-  }
-
-  function getInterviewRecommendation(avgScore) {
-    if (avgScore >= 8) {
-      return "Strong interview performance. You are close to interview-ready for this topic.";
-    }
-
-    if (avgScore >= 6) {
-      return "Good base is present, but answers need more structure, examples, and technical depth.";
-    }
-
-    return "Needs focused revision. First revise core concepts, then practice short structured answers.";
-  }
-
-  function getStrongPoints(avgScore) {
-    if (avgScore >= 8) {
-      return "Concept clarity, confidence, and answer structure look strong.";
-    }
-
-    if (avgScore >= 6) {
-      return "Basic understanding is present and you are able to attempt the questions.";
-    }
-
-    return "You are practicing consistently, which is the first strong point.";
-  }
-
-  function getWeakPoints(avgScore) {
-    if (avgScore >= 8) {
-      return "Add more real-world examples and edge-case explanations to make answers stronger.";
-    }
-
-    if (avgScore >= 6) {
-      return "Improve depth, examples, interview keywords, and step-by-step explanation.";
-    }
-
-    return "Revise definitions, working, examples, advantages, limitations, and common interview questions.";
-  }
-
-  async function saveInterviewReport(scores) {
-    const avgScore = getAverageScore(scores);
-    const today = new Date();
-    const reportTopic = activeTopic || getTopicForDisplay();
-
-    const report = {
-      id: Date.now(),
-      date: today.toLocaleDateString(),
-      time: today.toLocaleTimeString(),
-      topic: reportTopic,
-      level,
-      rounds: scores.length,
-      averageScore: avgScore,
-      strongPoints: getStrongPoints(avgScore),
-      weakPoints: getWeakPoints(avgScore),
-      recommendation: getInterviewRecommendation(avgScore),
-    };
-
-    const updatedHistory = [report, ...interviewHistory].slice(0, 20);
-
-    setFinalReport(report);
-    setInterviewHistory(updatedHistory);
-    localStorage.setItem(
-      "conceptviva_interview_history",
-      JSON.stringify(updatedHistory)
-    );
-
-    try {
-      const session = await ensureConceptVivaSession();
-
-      await apiFetchWithSessionRetry("/api/interview", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "saveInterviewReport",
-          session_id: session.sessionId,
-          topic: reportTopic,
-          level,
-          rounds: scores.length,
-          average_score: avgScore,
-          strong_points: report.strongPoints,
-          weak_points: report.weakPoints,
-          recommendation: report.recommendation,
-          evaluation_receipts: scores
-            .map((item) => item.evaluationReceipt)
-            .filter(Boolean),
-        }),
-      });
-    } catch (error) {
-      console.error("Interview report backend save failed:", error);
-    }
-  }
-
-  function clearInterviewHistory() {
-    setInterviewHistory([]);
-    localStorage.removeItem("conceptviva_interview_history");
-  }
-
-  async function generateQuestion(customQuestion = "") {
-    setLoadingQuestion(true);
+  async function generateQuestion(followUp = "") {
     setResult(null);
     setAnswer("");
-
-    try {
-      if (customQuestion) {
-        setQuestion(customQuestion);
-        setRound((prev) => prev + 1);
-
-        speakText(customQuestion, () => {
-          if (autoMode) {
-            startListening();
-          }
-        });
-
-        setLoadingQuestion(false);
-        return;
-      }
-
-      const topicForRequest = getTopicForRequest();
-      const topicForDisplay = getTopicForDisplay();
-
-      setActiveTopic(topicForDisplay);
-
-      const response = await apiFetchWithSessionRetry("/api/interview", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "question",
-          topic: topicForRequest,
-          level,
-        }),
-      });
-
-      const data = await response.json();
-
-      const generatedQuestion =
-        data.question ||
-        `Can you explain ${topicForDisplay} clearly with an example?`;
-
-      setQuestion(generatedQuestion);
-      setRound((prev) => prev + 1);
-
-      speakText(generatedQuestion, () => {
-        if (autoMode) {
-          startListening();
-        }
-      });
-    } catch (error) {
-      const fallbackTopic = getTopicForDisplay();
-      const fallbackQuestion = `Can you explain the basic concept of ${fallbackTopic}?`;
-
-      setQuestion(fallbackQuestion);
-      setRound((prev) => prev + 1);
-
-      speakText(fallbackQuestion, () => {
-        if (autoMode) {
-          startListening();
-        }
-      });
+    setError("");
+    if (followUp) {
+      askQuestion(followUp);
+      return;
     }
 
-    setLoadingQuestion(false);
+    setLoadingQuestion(true);
+    const cleanTopic = topic.trim();
+    try {
+      const data = await apiPost("/api/interview", {
+        action: "question",
+        level,
+        ...(cleanTopic
+          ? { topic: cleanTopic }
+          : {
+              auto_topic: true,
+              track: "interview",
+              revision_topics: revisionQueue.slice(0, 5).map((item) => item.topic),
+            }),
+      });
+      setActiveTopic(data.topic || cleanTopic || AUTO_TOPIC_LABEL);
+      askQuestion(data.question);
+    } catch (err) {
+      setError(err.message);
+      setAutoMode(false);
+    } finally {
+      setLoadingQuestion(false);
+    }
+  }
+
+  async function saveReport(allRounds) {
+    const scored = allRounds.filter((item) => typeof item.score === "number");
+    if (scored.length === 0) {
+      setError("None of the rounds could be scored (AI evaluation was unavailable), so no report was saved.");
+      return;
+    }
+    const avg = Number(averageScore(scored).toFixed(1));
+    const now = new Date();
+    const report = {
+      date: now.toLocaleDateString(),
+      time: now.toLocaleTimeString(),
+      topic: activeTopic,
+      level,
+      rounds: scored.length,
+      skippedRounds: allRounds.length - scored.length,
+      averageScore: avg,
+      ...summary(avg),
+    };
+    setFinalReport(report);
+    history.add(report);
+    track("attempt_submitted", "voice_interview");
+
+    try {
+      // The backend recomputes the average from its own signed receipts.
+      await apiPost("/api/interview", {
+        action: "saveInterviewReport",
+        topic: activeTopic,
+        level,
+        rounds: scored.length,
+        evaluation_receipts: scored.map((item) => item.receipt).filter(Boolean),
+      });
+    } catch (err) {
+      setError(`Report shown locally, but saving it to your dashboard failed: ${err.message}`);
+    }
   }
 
   async function evaluateAnswer() {
     if (!question.trim()) {
-      alert("Please generate a question first.");
+      setError("Generate a question first.");
       return;
     }
-
     if (!answer.trim()) {
-      alert("Please speak or write your answer first.");
+      setError("Speak or type your answer first.");
       return;
     }
-
+    mic.stop();
     setLoadingEvaluation(true);
-
-    const topicForEvaluation =
-      activeTopic === "AI Selected Topic" ? getTopicForRequest() : activeTopic;
-
+    setError("");
     try {
-      const response = await apiFetchWithSessionRetry("/api/interview", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "evaluate",
-          topic: topicForEvaluation,
-          level,
-          question,
-          answer,
-          mode: "interview",
-          display_topic: activeTopic,
-        }),
+      const data = await apiPost("/api/interview", {
+        action: "evaluate",
+        topic: activeTopic,
+        display_topic: activeTopic,
+        level,
+        question,
+        answer,
+        mode: "interview",
       });
-
-      const data = await response.json();
-
-      const evaluation = {
-        score: data.score ?? 0,
-        verdict: data.verdict || "PARTIAL",
-        feedback: data.feedback || "No feedback received.",
-        missing_points: data.missing_points || "",
-        corrected_answer: data.corrected_answer || "",
-        improvement: data.improvement || "Improve answer structure.",
-        follow_up_question:
-          data.follow_up_question ||
-          `Can you explain one practical use case of ${activeTopic}?`,
-        evaluationReceipt: data.evaluation_receipt || "",
-      };
-
-      setResult(evaluation);
-
-      const updatedScores = [
-        ...interviewScores,
-        {
-          round,
-          score: Number(evaluation.score || 0),
-          question,
-          answer,
-          verdict: evaluation.verdict,
-          evaluationReceipt: evaluation.evaluationReceipt,
-        },
+      setResult(data);
+      const scored = isScored(data);
+      const updatedRounds = [
+        ...rounds,
+        { round, score: scored ? data.score : null, verdict: data.verdict, receipt: data.evaluation_receipt || "" },
       ];
+      setRounds(updatedRounds);
+      if (data.verdict === "WEAK") addRevisionItem({ topic: activeTopic, question: question.slice(0, 300) });
 
-      setInterviewScores(updatedScores);
+      const spoken = scored
+        ? `Your score is ${data.score} out of 10. ${data.improvement || ""}`
+        : "I could not score that answer right now. Let's continue.";
 
-      const shortFeedback = `Your score is ${evaluation.score} out of 10. ${evaluation.improvement}`;
-
-      if (evaluation.verdict === "WEAK") {
-        addRevisionItem({
-          topic: activeTopic || getTopicForDisplay(),
-          question: question.slice(0, 300),
-        });
-      }
-
-      speakText(shortFeedback, () => {
-        if (!autoMode) return;
-
-        if (updatedScores.length >= maxRounds) {
-          saveInterviewReport(updatedScores);
-          setAutoMode(false);
-          return;
-        }
-
-        if (evaluation.verdict === "PARTIAL" && !followUpUsed) {
-          setFollowUpUsed(true);
-          generateQuestion(evaluation.follow_up_question);
-          return;
-        }
-
-        // STRONG moves on immediately. WEAK is added to revision and moves on.
-        // A second PARTIAL after its one follow-up also moves on.
-        setFollowUpUsed(false);
-        generateQuestion();
+      speech.speak(spoken, {
+        onEnd: () => {
+          if (!autoModeRef.current) return;
+          if (updatedRounds.length >= MAX_ROUNDS) {
+            setAutoMode(false);
+            saveReport(updatedRounds);
+            return;
+          }
+          if (data.verdict === "PARTIAL" && !followUpUsedRef.current && data.follow_up_question) {
+            followUpUsedRef.current = true;
+            generateQuestion(data.follow_up_question);
+            return;
+          }
+          // STRONG moves on, WEAK goes to revision and moves on, a second PARTIAL moves on.
+          followUpUsedRef.current = false;
+          generateQuestion();
+        },
       });
-    } catch (error) {
-      const evaluation = {
-        score: 5,
-        verdict: "WEAK",
-        evaluationReceipt: "",
-        feedback: "Something went wrong while evaluating your answer.",
-        improvement: "Check backend and API route connection.",
-        follow_up_question: `Can you explain ${activeTopic} with an example?`,
-      };
-
-      setResult(evaluation);
-
-      const updatedScores = [
-        ...interviewScores,
-        {
-          round,
-          score: Number(evaluation.score || 0),
-          question,
-          answer,
-          verdict: evaluation.verdict,
-          evaluationReceipt: evaluation.evaluationReceipt,
-        },
-      ];
-
-      setInterviewScores(updatedScores);
-
-      speakText("Evaluation failed. Please check backend connection.");
+    } catch (err) {
+      setError(err.message);
+      setAutoMode(false);
+    } finally {
+      setLoadingEvaluation(false);
     }
+  }
 
-    setLoadingEvaluation(false);
+  function resetInterview() {
+    speech.stop();
+    mic.stop();
+    setAutoMode(false);
+    followUpUsedRef.current = false;
+    setQuestion("");
+    setAnswer("");
+    setResult(null);
+    setRound(0);
+    setRounds([]);
+    setFinalReport(null);
+    setError("");
   }
 
   function startAutoInterview() {
     resetInterview();
     setAutoMode(true);
-
-    setTimeout(() => {
-      generateQuestion();
-    }, 300);
+    setTimeout(() => generateQuestion(), 300);
   }
 
   function finishInterviewNow() {
-    if (interviewScores.length === 0) {
-      alert("No evaluated answer yet. Answer at least one question first.");
+    if (rounds.length === 0) {
+      setError("Answer at least one question before finishing.");
       return;
     }
-
-    saveInterviewReport(interviewScores);
     setAutoMode(false);
-    stopSpeaking();
-    stopListening();
+    speech.stop();
+    mic.stop();
+    saveReport(rounds);
   }
 
-  const totalInterviews = interviewHistory.length;
-
-  const averageInterviewScore =
-    totalInterviews > 0
-      ? (
-          interviewHistory.reduce(
-            (sum, item) => sum + Number(item.averageScore || 0),
-            0
-          ) / totalInterviews
-        ).toFixed(1)
-      : "0.0";
-
-  const lastInterviewTopic = interviewHistory[0]?.topic || "N/A";
+  const localAverage = averageScore(history.items, "averageScore");
 
   return (
     <div className="mt-10 w-full max-w-6xl rounded-3xl border border-slate-700 bg-slate-950/70 p-5 shadow-2xl">
       <div className="mb-6 flex flex-col gap-4 border-b border-slate-800 pb-5 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-widest text-cyan-300">
-            Voice Interview Mode
-          </p>
-
-          <h2 className="mt-2 text-3xl font-bold text-white">
-            AI Mock Interview Coach
-          </h2>
-
+          <p className="text-sm font-semibold uppercase tracking-widest text-cyan-300">Voice Interview Mode</p>
+          <h2 className="mt-2 text-3xl font-bold text-white">AI Mock Interview Coach</h2>
           <p className="mt-1 text-base text-slate-400">
-            Practice topic-wise interview questions with voice, evaluation,
-            follow-ups, and final performance report.
+            Practice topic-wise interview questions with voice, evaluation, follow-ups, and a final report.
           </p>
         </div>
-
         <div className="flex flex-wrap gap-3">
           <button
             onClick={startAutoInterview}
             disabled={loadingQuestion || loadingEvaluation}
             className="rounded-xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-cyan-600 disabled:opacity-60"
           >
-            Start Auto Interview
+            {autoMode ? "Auto Interview Running..." : "Start Auto Interview"}
           </button>
-
-          <button
-            onClick={finishInterviewNow}
-            className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-600"
-          >
+          <button onClick={finishInterviewNow} className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-600">
             Finish & Report
           </button>
-
-          <button
-            onClick={resetInterview}
-            className="rounded-xl bg-slate-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-600"
-          >
+          <button onClick={resetInterview} className="rounded-xl bg-slate-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-600">
             Reset
           </button>
         </div>
       </div>
 
-      <div className="mb-5 grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Total Local Interviews</p>
-          <p className="mt-1 text-3xl font-bold text-white">
-            {totalInterviews}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Local Avg Interview Score</p>
-          <p className="mt-1 text-3xl font-bold text-white">
-            {averageInterviewScore}/10
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Current Round</p>
-          <p className="mt-1 text-3xl font-bold text-white">
-            {round}/{maxRounds}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-          <p className="text-sm text-slate-400">Last Local Topic</p>
-          <p className="mt-1 text-xl font-bold text-white">
-            {lastInterviewTopic}
-          </p>
-        </div>
+      <div className="mb-5 grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+        <StatCard label="Total Local Interviews" value={history.items.length} />
+        <StatCard label="Local Avg Interview Score" value={formatScore(localAverage)} />
+        <StatCard label="Current Round" value={`${round}/${MAX_ROUNDS}`} />
+        <StatCard label="Last Local Topic" value={history.items[0]?.topic || "N/A"} valueClassName="text-xl" />
       </div>
 
       {revisionQueue.length > 0 && (
@@ -701,12 +305,10 @@ Do not reveal the answer.
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="font-semibold text-amber-200">Revision Queue</p>
-              <p className="mt-1 text-sm text-slate-400">
-                Weak answers are prioritized in the next AI-selected interview.
-              </p>
+              <p className="mt-1 text-sm text-slate-400">Weak answers are prioritized in the next AI-selected interview.</p>
             </div>
             <button
-              onClick={clearRevisionQueue}
+              onClick={() => persistRevision([])}
               className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
             >
               Clear
@@ -715,8 +317,7 @@ Do not reveal the answer.
           <ul className="mt-3 space-y-2 text-sm text-slate-300">
             {revisionQueue.slice(0, 3).map((item, index) => (
               <li key={`${item.topic}-${index}`} className="line-clamp-2">
-                <span className="font-semibold text-amber-200">{item.topic}:</span>{" "}
-                {item.question}
+                <span className="font-semibold text-amber-200">{item.topic}:</span> {item.question}
               </li>
             ))}
           </ul>
@@ -725,31 +326,24 @@ Do not reveal the answer.
 
       <div className="mb-5 grid gap-4 md:grid-cols-2">
         <div>
-          <label className="mb-2 block text-sm text-slate-300">
-            Interview Topic Optional
-          </label>
-
+          <label htmlFor="interview-topic" className="mb-2 block text-sm text-slate-300">Interview Topic (optional)</label>
           <input
+            id="interview-topic"
             value={topic}
+            maxLength={200}
             onChange={(e) => {
               setTopic(e.target.value);
-              setActiveTopic(e.target.value.trim() || "AI Selected Topic");
+              setActiveTopic(e.target.value.trim() || AUTO_TOPIC_LABEL);
             }}
             className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white outline-none"
             placeholder="Example: KNN, Clustering, Arrays, URL Shortener"
           />
-
-          <p className="mt-2 text-xs text-slate-500">
-            Leave blank and AI will choose an interview topic automatically.
-          </p>
+          <p className="mt-2 text-xs text-slate-500">Leave blank and an interview topic is chosen automatically.</p>
         </div>
-
         <div>
-          <label className="mb-2 block text-sm text-slate-300">
-            Difficulty
-          </label>
-
+          <label htmlFor="interview-level" className="mb-2 block text-sm text-slate-300">Difficulty</label>
           <select
+            id="interview-level"
             value={level}
             onChange={(e) => setLevel(e.target.value)}
             className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white outline-none"
@@ -761,16 +355,19 @@ Do not reveal the answer.
         </div>
       </div>
 
+      {(error || mic.error) && (
+        <div className="mb-5">
+          <ErrorBanner message={error || mic.error} onDismiss={() => setError("")} />
+        </div>
+      )}
+
       <div className="grid gap-5 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5">
-          <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-xl font-bold text-white">Question</h3>
-              <p className="text-sm text-slate-400">
-                AI interviewer will ask one question at a time.
-              </p>
+              <p className="text-sm text-slate-400">Topic: {activeTopic}</p>
             </div>
-
             <button
               onClick={() => generateQuestion()}
               disabled={loadingQuestion}
@@ -779,33 +376,24 @@ Do not reveal the answer.
               {loadingQuestion ? "Generating..." : "Generate Question"}
             </button>
           </div>
-
           <div className="min-h-[180px] rounded-xl border border-slate-700 bg-slate-950/60 p-5">
-            {question ? (
-              <p className="whitespace-pre-line text-lg leading-8 text-white">
-                {question}
-              </p>
+            {loadingQuestion ? (
+              <LoadingState label="Preparing the next question..." />
+            ) : question ? (
+              <p className="whitespace-pre-line text-lg leading-8 text-white">{question}</p>
             ) : (
-              <p className="text-slate-400">
-                No question yet. Click Generate Question or Start Auto
-                Interview.
-              </p>
+              <p className="text-slate-400">No question yet. Click Generate Question or Start Auto Interview.</p>
             )}
           </div>
-
           <div className="mt-4 flex flex-wrap gap-3">
             <button
-              onClick={() => speakText(question)}
-              disabled={!question || isSpeaking}
+              onClick={() => speech.speak(question)}
+              disabled={!question || speech.isSpeaking}
               className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-600 disabled:opacity-60"
             >
-              {isSpeaking ? "Speaking..." : "Speak Question"}
+              {speech.isSpeaking ? "Speaking..." : "Speak Question"}
             </button>
-
-            <button
-              onClick={stopSpeaking}
-              className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-600"
-            >
+            <button onClick={speech.stop} className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-600">
               Stop Voice
             </button>
           </div>
@@ -814,46 +402,39 @@ Do not reveal the answer.
         <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-xl font-bold text-white">Your Answer</h3>
-              <p className="text-sm text-slate-400">
-                Speak or type your answer, then submit for evaluation.
-              </p>
+              <label htmlFor="interview-answer" className="text-xl font-bold text-white">Your Answer</label>
+              <p className="text-sm text-slate-400">Speak or type your answer, then submit for evaluation.</p>
             </div>
-
             <span
               className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                isListening
-                  ? "bg-red-950/50 text-red-300"
-                  : "bg-slate-800 text-slate-300"
+                mic.isListening ? "bg-red-950/50 text-red-300" : "bg-slate-800 text-slate-300"
               }`}
             >
-              {isListening ? "Listening..." : "Mic Idle"}
+              {mic.isListening ? "Listening..." : "Mic Idle"}
             </span>
           </div>
-
           <textarea
+            id="interview-answer"
             value={answer}
+            maxLength={20000}
             onChange={(e) => setAnswer(e.target.value)}
             className="min-h-[180px] w-full rounded-xl border border-slate-700 bg-slate-950/60 p-4 text-base leading-7 text-white outline-none"
             placeholder="Your answer will appear here..."
           />
-
           <div className="mt-4 flex flex-wrap gap-3">
             <button
-              onClick={startListening}
-              disabled={isListening}
+              onClick={() => {
+                speech.stop();
+                mic.start(answer);
+              }}
+              disabled={mic.isListening}
               className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-60"
             >
               Start Mic
             </button>
-
-            <button
-              onClick={stopListening}
-              className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-600"
-            >
+            <button onClick={mic.stop} className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-600">
               Stop Mic
             </button>
-
             <button
               onClick={evaluateAnswer}
               disabled={loadingEvaluation}
@@ -873,126 +454,49 @@ Do not reveal the answer.
 
       {finalReport && (
         <div className="mt-8 rounded-2xl border border-emerald-400/30 bg-emerald-950/20 p-5">
-          <h3 className="text-2xl font-bold text-white">
-            Final Interview Report
-          </h3>
-
+          <h3 className="text-2xl font-bold text-white">Final Interview Report</h3>
           <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
-              <p className="text-sm text-slate-400">Topic</p>
-              <p className="mt-1 font-bold text-white">{finalReport.topic}</p>
-            </div>
-
-            <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
-              <p className="text-sm text-slate-400">Rounds</p>
-              <p className="mt-1 font-bold text-white">
-                {finalReport.rounds}
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
-              <p className="text-sm text-slate-400">Average Score</p>
-              <p className="mt-1 font-bold text-white">
-                {finalReport.averageScore}/10
-              </p>
-            </div>
+            <StatCard label="Topic" value={finalReport.topic} valueClassName="text-base" />
+            <StatCard
+              label="Scored Rounds"
+              value={finalReport.rounds}
+              subtext={finalReport.skippedRounds ? `${finalReport.skippedRounds} round(s) could not be scored` : null}
+              valueClassName="text-base"
+            />
+            <StatCard label="Average Score" value={formatScore(finalReport.averageScore)} valueClassName="text-base" />
           </div>
-
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
               <p className="font-semibold text-emerald-300">Strong Points</p>
-              <p className="mt-2 text-sm leading-7 text-slate-200">
-                {finalReport.strongPoints}
-              </p>
+              <p className="mt-2 text-sm leading-7 text-slate-200">{finalReport.strongPoints}</p>
             </div>
-
             <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
               <p className="font-semibold text-yellow-300">Weak Points</p>
-              <p className="mt-2 text-sm leading-7 text-slate-200">
-                {finalReport.weakPoints}
-              </p>
+              <p className="mt-2 text-sm leading-7 text-slate-200">{finalReport.weakPoints}</p>
             </div>
           </div>
-
           <div className="mt-5 rounded-xl border border-cyan-400/30 bg-cyan-950/20 p-4">
             <p className="font-semibold text-cyan-300">Final Recommendation</p>
-            <p className="mt-2 text-sm leading-7 text-slate-200">
-              {finalReport.recommendation}
-            </p>
+            <p className="mt-2 text-sm leading-7 text-slate-200">{finalReport.recommendation}</p>
           </div>
         </div>
       )}
 
-      <div className="mt-8 rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
-        <div className="mb-4 flex items-center justify-between gap-4">
-          <div>
-            <h3 className="text-xl font-bold text-white">
-              Recent Interview History
-            </h3>
-            <p className="text-sm text-slate-400">
-              This section shows browser history for quick review. Open
-              Dashboard to view backend database records.
-            </p>
-          </div>
-
-          <button
-            onClick={clearInterviewHistory}
-            disabled={interviewHistory.length === 0}
-            className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50"
-          >
-            Clear Local History
-          </button>
-        </div>
-
-        {interviewHistory.length > 0 ? (
-          <div className="max-h-72 overflow-y-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-slate-400">
-                <tr className="border-b border-slate-700">
-                  <th className="py-3 pr-3">Date</th>
-                  <th className="py-3 pr-3">Topic</th>
-                  <th className="py-3 pr-3">Difficulty</th>
-                  <th className="py-3 pr-3">Rounds</th>
-                  <th className="py-3 pr-3">Avg Score</th>
-                  <th className="py-3 pr-3">Recommendation</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {interviewHistory.map((item) => (
-                  <tr key={item.id} className="border-b border-slate-800">
-                    <td className="py-3 pr-3 text-slate-300">
-                      {item.date} {item.time}
-                    </td>
-                    <td className="py-3 pr-3 font-semibold text-white">
-                      {item.topic}
-                    </td>
-                    <td className="py-3 pr-3 text-slate-300">{item.level}</td>
-                    <td className="py-3 pr-3 text-slate-300">
-                      {item.rounds}
-                    </td>
-                    <td className="py-3 pr-3 font-bold text-white">
-                      {item.averageScore}/10
-                    </td>
-                    <td className="py-3 pr-3 text-slate-300">
-                      {item.recommendation}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-6 text-center">
-            <p className="font-semibold text-white">
-              No interview history yet
-            </p>
-            <p className="mt-2 text-sm text-slate-400">
-              Complete an interview and click Finish & Report to save it.
-            </p>
-          </div>
-        )}
-      </div>
+      <LocalHistoryTable
+        title="Recent Interview History"
+        items={history.items}
+        onClear={history.clear}
+        emptyTitle="No interview history yet"
+        emptyMessage="Complete an interview and click Finish & Report to save it."
+        columns={[
+          { label: "Date", render: (item) => `${item.date} ${item.time}` },
+          { label: "Topic", key: "topic", className: "font-semibold text-white" },
+          { label: "Difficulty", key: "level" },
+          { label: "Rounds", key: "rounds" },
+          { label: "Avg Score", render: (item) => formatScore(item.averageScore), className: "font-bold text-white" },
+          { label: "Recommendation", key: "recommendation" },
+        ]}
+      />
     </div>
   );
 }
