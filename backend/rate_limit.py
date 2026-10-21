@@ -59,9 +59,9 @@ def enforce_rate_limit(
     if bucket == "session_start":
         key = f"session:{_client_ip(request)}"
         limit = SESSION_STARTS_PER_MINUTE
-    elif bucket == "ai":
+    elif bucket in ("ai", "judge"):
         identity = session_id or _client_ip(request)
-        key = f"ai:{identity}"
+        key = f"{bucket}:{identity}"
         limit = AI_REQUESTS_PER_MINUTE
     else:
         identity = session_id or _client_ip(request)

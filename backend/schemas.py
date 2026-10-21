@@ -149,3 +149,10 @@ class ProjectSubmissionRequest(BaseModel):
 
 class TranslateRequest(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
+
+
+class DSARunRequest(BaseModel):
+    # Either a bank question id, or a problem text containing "Question ID: ...".
+    question_id: str = Field(default="", max_length=100)
+    problem: str = Field(default="", max_length=30000)
+    solution: str = Field(min_length=1, max_length=30000)

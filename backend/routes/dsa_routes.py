@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from schemas import (
     DSAOwnQuestionRequest,
     DSAPracticeQuestionRequest,
     DSAProblemRequest,
+    DSARunRequest,
     SaveDSAAttemptRequest,
 )
 from security import create_evaluation_receipt, get_current_session_id
@@ -335,3 +336,74 @@ async def save_dsa_attempt(
         "evaluation_status": result["evaluation_status"],
         "attempt": serialize_dsa_attempt(attempt),
     }
+
+
+# ------------------------------------------------------------------ judge endpoints
+
+
+def _bank_question_for_run(request: DSARunRequest):
+    question_id = request.question_id or extract_question_id_from_problem_text(request.problem)
+    question = get_dsa_question_by_id(question_id) if question_id else None
+    if not question or not question.get("runner"):
+        raise HTTPException(
+            status_code=400,
+            detail="Hidden-test runs are only available for curated bank questions.",
+        )
+    if not judge_available():
+        raise HTTPException(
+            status_code=503,
+            detail="The hidden-test judge is offline right now. Submit for AI review instead.",
+        )
+    return question
+
+
+@router.post("/dsa/run")
+async def run_dsa_solution(
+    request: DSARunRequest,
+    http_request: Request,
+    session_id: str = Depends(get_current_session_id),
+):
+    """Run hidden tests only (no AI review, nothing saved). Waits up to JUDGE_WAIT_SECONDS."""
+    enforce_rate_limit(http_request, bucket="judge", session_id=session_id)
+    question = _bank_question_for_run(request)
+    result = await judge_client.judge_and_wait(question, request.solution, session_id=session_id)
+    if result is None:
+        raise HTTPException(status_code=503, detail="The hidden-test judge is offline right now.")
+    return {"question_id": question["id"], **result}
+
+
+@router.post("/dsa/submissions", status_code=202)
+async def create_dsa_submission(
+    request: DSARunRequest,
+    http_request: Request,
+    session_id: str = Depends(get_current_session_id),
+):
+    """Asynchronous variant: enqueue and return immediately; poll GET /dsa/submissions/{id}."""
+    enforce_rate_limit(http_request, bucket="judge", session_id=session_id)
+    question = _bank_question_for_run(request)
+    try:
+        submission_id = await judge_client.submit(question, request.solution, session_id=session_id)
+    except judge_client.queue.QueueFullError:
+        raise HTTPException(status_code=503, detail="Judge is busy. Try again shortly.")
+    return {"submission_id": submission_id, "status": "queued", "question_id": question["id"]}
+
+
+@router.get("/dsa/submissions/{submission_id}")
+async def get_dsa_submission(
+    submission_id: str,
+    session_id: str = Depends(get_current_session_id),
+):
+    if not judge_available():
+        raise HTTPException(status_code=503, detail="The hidden-test judge is offline right now.")
+    submission = await judge_client.get_status(submission_id[:64], session_id=session_id)
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Submission not found.")
+    response = {
+        "submission_id": submission_id,
+        "status": submission["status"],
+        "question_id": submission["question_id"],
+    }
+    if submission["result"]:
+        response.update(submission["result"])
+        response["status"] = submission["status"]
+    return response

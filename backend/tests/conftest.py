@@ -68,6 +68,35 @@ def _reset_llm_and_cache():
 
 
 @pytest.fixture()
+def override_settings():
+    """Temporarily change fields on the frozen Settings object."""
+    from config import settings
+
+    originals = {}
+
+    def apply(**values):
+        for name, value in values.items():
+            originals.setdefault(name, getattr(settings, name))
+            object.__setattr__(settings, name, value)
+
+    yield apply
+    for name, value in originals.items():
+        object.__setattr__(settings, name, value)
+
+
+@pytest.fixture()
+def fake_redis():
+    import fakeredis
+
+    from redis_client import set_redis
+
+    client = fakeredis.FakeRedis(decode_responses=True)
+    set_redis(client)
+    yield client
+    set_redis(None)
+
+
+@pytest.fixture()
 def client():
     from database import engine
     from main import app

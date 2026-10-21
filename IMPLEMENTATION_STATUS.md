@@ -34,7 +34,19 @@ Phase 1 tests: `python -m pytest` → 86 passed. `npm run lint` → clean.
 
 | Item | Status | Notes |
 |---|---|---|
-| Judge service | TODO | |
+| No code execution in FastAPI | DONE | Old in-process `dsa_runner.py` removed. The API only enqueues (`judge/client.py`); `judge/worker.py` is a separate process. |
+| Isolated executors | DONE | `Judge0Executor` (network disabled, CPU/wall/memory/process limits), `SandboxExecutor` (HMAC-signed requests to `judge/sandbox_server.py`, limits clamped server-side), dev-only `LocalExecutor` refused unless `JUDGE_ALLOW_UNSAFE_LOCAL=true`. |
+| Process limits | DONE | `judge/process_runner.py`: RLIMIT_CPU/AS/NPROC/FSIZE/NOFILE/CORE, own session + group kill, uid drop when root, empty env, temp cwd, wall clock and output caps. rlimits only apply on Linux (sandbox container); Windows dev runs have wall/output limits only. |
+| Hidden tests | DONE | All 90 bank questions run their tests in `judge/harness_script.py`. Only the first sample case and the first failing case are revealed. |
+| Redis queue + async workers | DONE | `judge/queue.py`: BLMOVE reliable queue, processing list, stale-job recovery (max 2 attempts), backpressure, worker heartbeat, source deleted after judging, 1 h retention. |
+| Verdicts | DONE | Accepted, Wrong Answer, Time Limit Exceeded, Runtime Error, Compilation Error, plus Memory Limit Exceeded, Output Limit Exceeded and Internal Error (`judge/verdicts.py`). |
+| No false "verified" labels | DONE | `verified` only when `scoring_method == "hidden_tests"`. The judge counts as available only with JUDGE_ENABLED, a configured isolated executor, Redis, and a live worker heartbeat. |
+| Endpoints | DONE | `POST /dsa/run` (sync wait), `POST /dsa/submissions` (202) + `GET /dsa/submissions/{id}` (owner-only). `/evaluate-dsa-solution` uses the judge for bank questions. |
+| Container hardening config | DONE in Phase 6 | See `docker-compose.yml` `sandbox` service. |
+| Live Judge0 / Docker sandbox run | BLOCKED | Docker is not installed on the implementation machine, so the Judge0 executor and the containerized sandbox were not run end to end. Judge0 request/response mapping is unit tested; harness verdicts are tested through the real local subprocess. |
+| Expand hidden tests beyond 3 per question | TODO | The bank currently has 3 tests per question. More edge-case tests would make verdicts stronger. |
+
+Phase 2 tests: `python -m pytest` → 116 passed.
 
 ## Phase 3 — AI grader benchmarking
 
