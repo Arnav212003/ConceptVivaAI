@@ -1,4 +1,5 @@
 import { formatScore, scoreTone } from "@/lib/scoring";
+import { testSummary } from "@/lib/testResults";
 
 export function formatDate(value) {
   if (!value) return "N/A";
@@ -129,7 +130,9 @@ export function buildTimeline(history) {
     ...(history?.dsa_practice || []).map((item) => ({
       id: `dsa-${item.id}`, type: item.tier === "verified" ? "DSA Attempt · Verified" : "DSA Attempt",
       title: item.problem_name || "DSA Problem",
-      subtitle: `Topic: ${item.topic || "DSA"} · Score: ${formatScore(item.score)} · ${item.judge_verdict || item.status || ""}`,
+      subtitle: [`Topic: ${item.topic || "DSA"}`, `Score: ${formatScore(item.score)}`, testSummary(item) || item.status]
+        .filter(Boolean)
+        .join(" · "),
       score: item.score, topic: item.topic, created_at: item.created_at,
     })),
     ...(history?.project_challenge || []).map((item) => ({

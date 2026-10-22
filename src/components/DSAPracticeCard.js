@@ -11,6 +11,7 @@ import useLocalHistory from "@/hooks/useLocalHistory";
 import useSolutionVoice from "@/hooks/useSolutionVoice";
 import { track } from "@/lib/analytics";
 import { DSA_TOPICS, difficultyStyle } from "@/lib/difficulty";
+import { testSummary } from "@/lib/testResults";
 
 export default function DSAPracticeCard() {
   // "verified" = curated 90-question bank (hidden tests when the judge is online).
@@ -75,6 +76,7 @@ export default function DSAPracticeCard() {
         problemName: workspace.problemData?.title || "DSA Problem",
         score: data.score,
         status: data.status || (data.score === null ? "Unavailable" : "Needs Improvement"),
+        tests: testSummary(data.saved_attempt || {}),
       });
     }
   }
@@ -95,7 +97,9 @@ export default function DSAPracticeCard() {
       ? judgeEnabled === false
         ? "Curated bank. The hidden-test judge is offline right now, so scoring uses AI review."
         : "Hidden-test scored by the isolated judge."
-      : "AI-review scored: unlimited topics, no hidden tests.";
+      : judgeEnabled === false
+        ? "AI-review scored. The code judge is offline, so sample tests can't run right now."
+        : "AI-generated sample tests run in the sandbox; the score comes from AI review.";
 
   return (
     <div className="mt-10 w-full max-w-6xl rounded-3xl border border-slate-700 bg-slate-950/70 p-4 shadow-2xl">
@@ -201,10 +205,18 @@ export default function DSAPracticeCard() {
         </div>
       )}
 
+      {mode === "ai" && workspace.execution && !workspace.execution.available && (
+        <div className="mb-5">
+          <Notice tone="warn">
+            {workspace.execution.reason} Run Code will do a quick AI check instead, and Submit uses AI review only.
+          </Notice>
+        </div>
+      )}
+
       <Workspace
         workspace={workspace}
         voice={voice}
-        onRun={() => workspace.run({ topic: effectiveTopic, difficulty, judgeEnabled: judgeEnabled && mode === "verified" })}
+        onRun={() => workspace.run({ topic: effectiveTopic, difficulty, judgeEnabled: Boolean(judgeEnabled) })}
         onSubmit={submit}
         onRevealSolution={revealSolution}
         header={

@@ -1,3 +1,8 @@
+const ERROR_KIND_LABEL = {
+  syntax_error: "Syntax Error",
+  signature_mismatch: "Function signature mismatch",
+};
+
 const VERDICT_STYLES = {
   Accepted: "border-emerald-400/40 bg-emerald-950/30 text-emerald-300",
   Pending: "border-slate-600 bg-slate-900/60 text-slate-300",
@@ -31,6 +36,9 @@ export function VerdictBanner({ judge, testCases }) {
     <div className={`mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-5 py-4 ${style}`}>
       <div>
         <p className="text-lg font-bold" data-testid="verdict">{verdict}</p>
+        {ERROR_KIND_LABEL[judge?.error_kind] && (
+          <p className="text-sm font-semibold" data-testid="error-kind">{ERROR_KIND_LABEL[judge.error_kind]}</p>
+        )}
         {total > 0 && (
           <p className="mt-1 text-xs text-slate-400">
             {passed} / {total} testcases passed

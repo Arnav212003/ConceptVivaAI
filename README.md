@@ -14,9 +14,9 @@ tests in an isolated sandbox, never inside the API.
 | Area | What you can do |
 |---|---|
 | ML practice | Topic-wise (or auto-selected) questions; rubric score with per-criterion rationale, missing points, model answer, follow-up. |
-| DSA practice | 90 curated questions with hidden tests, or unlimited AI-generated problems on any topic. Monaco editor, Run (hidden tests) and Submit. |
+| DSA practice | 90 curated questions with hidden tests, or unlimited AI-generated problems on any topic. AI-generated problems come with validated sample tests that run in the same sandbox (shown with input, expected and actual output, labelled as AI-generated and not verified). Monaco editor, Run and Submit. |
 | DSA mock interview | 10-question mixed sets (3 Easy / 4 Medium / 3 Hard). |
-| Code judge | Accepted, Wrong Answer, Time Limit Exceeded, Memory Limit Exceeded, Output Limit Exceeded, Runtime Error, Compilation Error. |
+| Code judge | Accepted, Wrong Answer, Time Limit Exceeded, Memory Limit Exceeded, Output Limit Exceeded, Runtime Error, Compilation Error (with syntax errors identified). |
 | Voice interview | Browser speech recognition + synthesis, follow-ups for partial answers, revision queue, final report built from server-signed round scores. |
 | Explanations | "Stuck?" reveals the optimized solution and reads it aloud in English or Hindi. |
 | Project challenges | AI-generated mini projects; upload a whole source folder for cross-file review (bugs, security, missing requirements). |
@@ -132,9 +132,9 @@ sandbox and the frontend on http://localhost:3000, with hidden-test judging enab
 
 | Suite | Command | Result at last run |
 |---|---|---|
-| Backend unit/integration | `cd backend && python -m pytest` | 171 passed |
-| Frontend unit/component | `npm test` | 27 passed |
-| End-to-end (desktop + mobile Chromium) | `npm run test:e2e` | 12 passed |
+| Backend unit/integration | `cd backend && python -m pytest` | 197 passed |
+| Frontend unit/component | `npm test` | 33 passed |
+| End-to-end (desktop + mobile Chromium) | `npm run test:e2e` | 14 passed |
 | Lint / build | `npm run lint`, `npm run build` | clean / OK |
 | Grader benchmark (offline) | `python -m benchmarks.grader.run_benchmark --dataset benchmarks/grader/data/synthetic_seed.jsonl --grader fooled_model` | see below |
 | Load test | `locust -f loadtests/locustfile.py ...` | see [`loadtests/RESULTS.md`](loadtests/RESULTS.md) |
@@ -188,6 +188,9 @@ so this covers known patterns only. No human-agreement numbers are claimed yet.
 
 - The human-labelled benchmark has not been collected; grader accuracy against humans is unmeasured.
 - Each curated DSA question has 3 hidden tests; more edge cases would make verdicts stricter.
+- Sample tests for AI-generated problems, and the reference solution used to cross-check them, come from the same model. Cross-checking removes inconsistent tests but cannot prove the remaining expected outputs correct, so these results are never shown as verified.
+- AI-generated problems support plain-value signatures only (ints, floats, strings, booleans and lists of them); linked-list, tree and design-style problems fall back to AI review.
+- A generated problem is stored for 6 hours and is tied to the session that created it; signing in mid-problem requires generating it again.
 - Judge0 and the Docker sandbox have not been exercised end to end on this machine (no Docker locally); CI builds the images, and the harness is tested through a real subprocess.
 - The self-hosted sandbox relies on container hardening, so on a PaaS without those controls use Judge0.
 - Guest sessions still use localStorage tokens (signed accounts use HttpOnly cookies).

@@ -12,6 +12,7 @@ import useSolutionVoice from "@/hooks/useSolutionVoice";
 import { track } from "@/lib/analytics";
 import { apiPost } from "@/lib/api";
 import { DSA_TOPICS } from "@/lib/difficulty";
+import { testSummary } from "@/lib/testResults";
 
 export default function DSAMockCard() {
   const [topic, setTopic] = useState("Arrays");
@@ -77,6 +78,7 @@ export default function DSAMockCard() {
         problemName: workspace.problemData?.title || selected?.title || "DSA Problem",
         score: data.score,
         status: data.status || "Needs Improvement",
+        tests: testSummary(data.saved_attempt || {}),
       });
     }
   }

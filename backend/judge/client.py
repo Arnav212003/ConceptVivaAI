@@ -39,7 +39,7 @@ def reset_availability_cache() -> None:
     _availability_cache.update(checked_at=0.0, value=False)
 
 
-async def submit(question: dict, solution: str, *, session_id: str) -> str:
+async def submit(question: dict, solution: str, *, session_id: str, reveal_all: bool = False) -> str:
     redis = get_redis()
     return await run_in_threadpool(
         queue.enqueue,
@@ -48,6 +48,7 @@ async def submit(question: dict, solution: str, *, session_id: str) -> str:
         question_id=question.get("id", ""),
         runner=question["runner"],
         solution=solution,
+        reveal_all=reveal_all,
     )
 
 
@@ -73,12 +74,13 @@ async def wait_for_result(submission_id: str, *, session_id: str, timeout: float
         delay = min(0.25, delay * 1.5)
 
 
-async def judge_and_wait(question: dict, solution: str, *, session_id: str = "") -> dict | None:
+async def judge_and_wait(question: dict, solution: str, *, session_id: str = "",
+                         reveal_all: bool = False) -> dict | None:
     """Enqueue and wait up to JUDGE_WAIT_SECONDS. Returns None when the judge is off."""
     if not judge_available():
         return None
     try:
-        submission_id = await submit(question, solution, session_id=session_id)
+        submission_id = await submit(question, solution, session_id=session_id, reveal_all=reveal_all)
     except queue.QueueFullError:
         return {"status": "error", "verdict": "Internal Error", "error": "Judge is busy. Try again shortly.",
                 "passed": 0, "total": 0, "test_cases": []}

@@ -11,6 +11,7 @@ PINNED_FINGERPRINTS = {
     "project_review@2.0.0": "7c76e16b84966acb",
     "interview_question@2.0.0": "5dacf9a67aa5fd4f",
     "dsa_problem@2.0.0": "ced45a793e3e878e",
+    "ai_practice_problem@1.0.0": "a2a89b30b8ea90cd",
     "project_challenge@2.0.0": "f1615c4393d324fc",
     "translate_hindi@2.0.0": "b39dcaed9fe48825",
 }

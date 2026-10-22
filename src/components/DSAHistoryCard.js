@@ -129,6 +129,7 @@ export default function DSAHistoryCard() {
                   <th className="py-3 pr-3">Topic</th>
                   <th className="py-3 pr-3">Difficulty</th>
                   <th className="py-3 pr-3">Score</th>
+                  <th className="py-3 pr-3">Tests</th>
                   <th className="py-3 pr-3">Status</th>
                 </tr>
               </thead>
@@ -151,6 +152,9 @@ export default function DSAHistoryCard() {
                     </td>
                     <td className="py-3 pr-3 font-bold text-white">
                       {formatScore(item.score)}
+                    </td>
+                    <td className="py-3 pr-3 text-xs text-slate-400">
+                      {item.tests || "—"}
                     </td>
                     <td className="py-3 pr-3">
                       <span

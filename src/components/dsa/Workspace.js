@@ -7,6 +7,7 @@ import SolutionPanel from "@/components/dsa/SolutionPanel";
 import { TestCaseList, VerdictBanner } from "@/components/dsa/TestResults";
 import VoiceControls from "@/components/dsa/VoiceControls";
 import { difficultyStyle } from "@/lib/difficulty";
+import { AI_SAMPLES_NOTE, crossCheckNote } from "@/lib/testResults";
 
 const TABS = [
   ["code", "</> Code", "border-pink-400"],
@@ -31,7 +32,12 @@ function RunPanel({ workspace }) {
     <div>
       {runResult.source === "ai" && (
         <p className="mb-3 text-xs text-slate-400">
-          Quick AI check (hidden tests are not available for this question right now). Nothing was saved.
+          Quick AI check (no executable tests are available for this question right now). Nothing was saved.
+        </p>
+      )}
+      {runResult.source === "ai_samples" && (
+        <p className="mb-3 text-xs text-amber-200/90" data-testid="ai-samples-note">
+          {AI_SAMPLES_NOTE} {crossCheckNote(runResult.cross_check)} Nothing was saved.
         </p>
       )}
       <VerdictBanner judge={runResult.judge} testCases={runResult.test_cases} />

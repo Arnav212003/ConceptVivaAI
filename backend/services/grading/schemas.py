@@ -157,6 +157,41 @@ class DSAProblemOutput(_Strict):
     starter_code: Annotated[str, _trim(1500)]
 
 
+# Types an AI-generated problem may use. Kept small so every value can be
+# checked exactly and passed to the harness as plain JSON.
+ValueType = Literal[
+    "int", "float", "str", "bool",
+    "list[int]", "list[float]", "list[str]", "list[bool]",
+    "list[list[int]]", "list[list[str]]",
+]
+
+
+class ParameterSpec(_Strict):
+    name: Annotated[str, _trim(40)]
+    type: ValueType
+
+
+class GeneratedTestCase(_Strict):
+    # JSON-encoded so Gemini's schema does not need arbitrary value types.
+    input_json: Annotated[str, _trim(5000)]
+    expected_output_json: Annotated[str, _trim(5000)]
+
+
+class AIPracticeProblemOutput(DSAProblemOutput):
+    """AI-practice problem plus an executable signature, tests and a reference solution.
+
+    Everything here is AI-generated and validated server-side before use
+    (services/dsa_generated_tests.py). None of it is treated as ground truth.
+    """
+
+    function_name: Annotated[str, _trim(60)]
+    parameters: list[ParameterSpec] = Field(min_length=1, max_length=6)
+    return_type: ValueType
+    order_matters: bool
+    test_cases: list[GeneratedTestCase] = Field(min_length=1, max_length=10)
+    reference_solution: CodeText
+
+
 class DatasetColumn(_Strict):
     column: Annotated[str, _trim(100)]
     description: ShortText

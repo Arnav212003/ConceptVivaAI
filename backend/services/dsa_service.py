@@ -10,14 +10,15 @@ Scoring authority:
 from __future__ import annotations
 
 import ast
+import json
 from uuid import uuid4
 
 from cache import cache_get, cache_set, make_key
 from services import llm
 from services.grading import safety
 from services.grading.evaluators import STATUS_COMPLETED, review_code
-from services.grading.prompts import DSA_PROBLEM
-from services.grading.schemas import DSAProblemOutput
+from services.grading.prompts import AI_PRACTICE_PROBLEM, DSA_PROBLEM
+from services.grading.schemas import AIPracticeProblemOutput, DSAProblemOutput
 from utils import get_topic_key
 
 # verified = hidden-test scored, ai_generated = AI-reviewed only.
@@ -165,8 +166,130 @@ async def generate_dsa_problem_json_from_gemini(question, enforce_signature=True
     return result
 
 
-async def generate_ai_practice_question(topic, difficulty, recent_titles=None):
-    """Generate a custom-topic problem that will be AI-reviewed."""
+def _no_execution(reason: str) -> dict:
+    return {"available": False, "test_count": 0, "cross_check": "not_run", "reason": reason}
+
+
+def ai_problem_runner(stored: dict) -> dict:
+    """Harness runner config, built only from server-stored, validated data."""
+    return {
+        "entry": "function",
+        "function": stored["function_name"],
+        "tests": stored["tests"],
+        "arg_types": [],
+        "return_type": "raw",
+        "compare": stored["compare"],
+        "mutate_index": None,
+    }
+
+
+async def _cross_check(stored: dict, owner: str):
+    """Run the AI's own reference solution on its tests inside the sandbox.
+
+    Tests the reference disagrees with are dropped. This filters inconsistent
+    tests; it does not make them ground truth (both come from the same model).
+    Returns (tests, status) where status is cross_checked | reference_failed | not_run.
+    """
+    from judge.client import judge_and_wait
+
+    if not stored.get("reference_solution") or not judge_available():
+        return stored["tests"], "not_run"
+    question = {"id": "ai_reference", "runner": ai_problem_runner(stored)}
+    result = await judge_and_wait(question, stored["reference_solution"], session_id=owner, reveal_all=True)
+    if not result or result.get("status") != "finished":
+        return stored["tests"], "not_run"
+    cases = result.get("test_cases", [])
+    if len(cases) != len(stored["tests"]):
+        # The reference did not reach the per-test phase (syntax/load error, TLE).
+        return stored["tests"], "reference_failed"
+    agreed = [test for test, case in zip(stored["tests"], cases) if case.get("status") == "Passed"]
+    return agreed, "cross_checked"
+
+
+async def _prepare_ai_problem(output, question: dict, owner: str):
+    """Validate the generated signature/tests, cross-check, store server-side.
+
+    Returns (public_problem_json, execution_info). Tests and the reference
+    solution never leave the server except as revealed run results.
+    """
+    from services.ai_problem_store import new_problem_id, save_problem
+    from services.dsa_generated_tests import (
+        MIN_EXECUTABLE_TESTS,
+        InvalidSignature,
+        build_starter_code,
+        compare_mode,
+        format_args,
+        validate_signature,
+        validate_tests,
+    )
+
+    parameters = [p.model_dump() for p in output.parameters]
+    problem_json = {
+        "question_id": "",
+        "title": output.title or question["title"],
+        "topic": question["topic"],
+        "difficulty": question["difficulty"],
+        "pattern": question["pattern"],
+        "description": output.description,
+        "examples": [example.model_dump() for example in output.examples],
+        "constraints": list(output.constraints),
+        "follow_up": output.follow_up,
+        "generated_by": "ai",
+    }
+
+    try:
+        validate_signature(output.function_name, parameters, output.return_type)
+    except InvalidSignature as exc:
+        problem_json["starter_code"] = output.starter_code if _valid_ai_starter(output.starter_code) \
+            else get_default_starter_code()
+        return problem_json, _no_execution(f"The generated function signature was invalid ({exc}).")
+
+    problem_json["starter_code"] = build_starter_code(output.function_name, parameters)
+    tests, rejected = validate_tests([t.model_dump() for t in output.test_cases], parameters, output.return_type)
+    stored = {
+        "title": problem_json["title"],
+        "topic": question["topic"],
+        "difficulty": question["difficulty"],
+        "function_name": output.function_name,
+        "parameters": parameters,
+        "return_type": output.return_type,
+        "compare": compare_mode(output.return_type, output.order_matters),
+        "tests": tests,
+        "reference_solution": output.reference_solution,
+        "rejected_count": len(rejected),
+    }
+
+    cross_check = "not_run"
+    if len(tests) >= MIN_EXECUTABLE_TESTS:
+        tests, cross_check = await _cross_check(stored, owner)
+        stored["tests"] = tests
+
+    executable = len(tests) >= MIN_EXECUTABLE_TESTS
+    if not executable:
+        reason = (
+            "The AI-generated tests disagreed with the AI reference solution, so they were discarded."
+            if cross_check == "cross_checked"
+            else "Not enough valid AI-generated test cases could be validated for this question."
+        )
+        execution = _no_execution(reason)
+    else:
+        execution = {"available": True, "test_count": len(tests), "cross_check": cross_check, "reason": ""}
+        # Show the validated tests as the examples, so the statement matches what runs.
+        problem_json["examples"] = [
+            {"input": format_args(parameters, t["args"]), "output": json.dumps(t["expected"]), "explanation": ""}
+            for t in tests[:3]
+        ]
+
+    stored["executable"] = executable
+    stored["cross_check"] = cross_check
+    problem_id = new_problem_id()
+    save_problem(problem_id, owner, stored)
+    problem_json["practice_problem_id"] = problem_id
+    return problem_json, execution
+
+
+async def generate_ai_practice_question(topic, difficulty, recent_titles=None, owner=""):
+    """Generate a custom-topic problem with executable AI-generated sample tests."""
     synthetic_question = {
         "id": "",
         "title": f"{topic} Practice Problem",
@@ -175,14 +298,58 @@ async def generate_ai_practice_question(topic, difficulty, recent_titles=None):
         "pattern": "AI Generated",
         "source": "AI Generated",
     }
-    problem_json = await generate_dsa_problem_json_from_gemini(
-        synthetic_question,
-        enforce_signature=False,
-        recent_titles=recent_titles,
-    )
-    # Empty id keeps AI-practice questions out of the curated judge path.
-    problem_json["question_id"] = ""
-    return synthetic_question, problem_json
+    try:
+        output = await llm.generate_structured(
+            "ai_practice_problem",
+            system_instruction=AI_PRACTICE_PROBLEM.system_instruction,
+            prompt=_problem_prompt(synthetic_question, False, recent_titles, trusted_metadata=False),
+            schema=AIPracticeProblemOutput,
+            temperature=0.7,
+        )
+    except llm.LLMUnavailableError:
+        problem_json = get_fallback_problem_json(synthetic_question)
+        # Empty id keeps AI-practice questions out of the curated judge path.
+        problem_json["question_id"] = ""
+        return synthetic_question, problem_json, _no_execution("The AI problem writer is unavailable.")
+
+    problem_json, execution = await _prepare_ai_problem(output, synthetic_question, owner)
+    return synthetic_question, problem_json, execution
+
+
+def _execution_summary(judge_result) -> str:
+    if not judge_result:
+        return "not run"
+    if judge_result.get("status") != "finished":
+        return "could not be run"
+    return f"{judge_result.get('passed', 0)}/{judge_result.get('total', 0)} passed ({judge_result.get('verdict')})"
+
+
+async def evaluate_ai_practice_solution(stored: dict, problem_text: str, solution: str, judge_result=None):
+    """AI rubric review plus execution of the stored AI-generated sample tests.
+
+    The score is the AI rubric score. Sample-test results are reported (and given
+    to the reviewer as server-computed context) but are not a verified score.
+    """
+    metadata = {
+        "Title": stored.get("title", "DSA Problem"),
+        "Topic": stored.get("topic", "DSA"),
+        "Difficulty": stored.get("difficulty", "Medium"),
+        "Sample test execution (AI-generated tests, run on the server)": _execution_summary(judge_result),
+    }
+    review = await review_code(metadata=metadata, problem_text=problem_text, solution=solution)
+    result = {**review, **_judge_fields(judge_result), "scoring_method": "ai_rubric"}
+    result["execution"] = {
+        "source": "ai_generated_samples",
+        "verified": False,
+        "cross_check": stored.get("cross_check", "not_run"),
+        "available": bool(stored.get("executable")),
+        "verdict": (judge_result or {}).get("verdict"),
+        "passed": result["passed"],
+        "total": result["total"],
+    }
+    # Execution ran on AI-generated tests, so it never counts as hidden-test support.
+    result["runner_supported"] = False
+    return result
 
 
 def build_problem_text_from_json(problem_json):

@@ -26,9 +26,12 @@ from services.dsa_bank import (
     get_dsa_question_by_id,
     get_dsa_questions_by_difficulty,
 )
+from services.ai_problem_store import load_problem
 from services.dsa_service import (
     TIER_VERIFIED,
+    ai_problem_runner,
     build_problem_text_from_json,
+    evaluate_ai_practice_solution,
     evaluate_bank_dsa_solution,
     evaluate_custom_dsa_solution,
     generate_ai_practice_question,
@@ -196,15 +199,18 @@ async def generate_ai_practice_question_route(
     """Generate a free-topic DSA problem for AI-reviewed practice."""
     enforce_rate_limit(http_request, bucket="ai", session_id=session_id)
     recent_titles = [t.strip()[:150] for t in request.recent_titles if t and t.strip()][:15]
-    question, problem_json = await generate_ai_practice_question(
+    question, problem_json, execution = await generate_ai_practice_question(
         request.topic,
         request.difficulty,
         recent_titles=recent_titles,
+        owner=session_id,
     )
     response = _practice_response(
-        "ai_practice", question, problem_json, "AI practice question generated. Scored by AI review, not hidden tests."
+        "ai_practice", question, problem_json,
+        "AI practice question generated. Sample tests are AI-generated; scoring uses AI review.",
     )
     response["tier"] = get_question_tier(runner_supported=False)
+    response["execution"] = execution
     return response
 
 
@@ -214,8 +220,37 @@ def _status_label(result):
     return "Passed" if result["score"] >= 8 else "Needs Improvement"
 
 
+def _load_ai_problem(practice_problem_id: str, session_id: str) -> dict:
+    stored = load_problem(practice_problem_id, session_id)
+    if stored is None:
+        raise HTTPException(
+            status_code=404,
+            detail="This AI practice problem has expired or belongs to another session. Generate a new one.",
+        )
+    return stored
+
+
+async def _run_ai_samples(stored: dict, solution: str, session_id: str):
+    if not stored.get("executable"):
+        return None
+    question = {"id": "ai_practice", "runner": ai_problem_runner(stored)}
+    return await judge_client.judge_and_wait(question, solution, session_id=session_id, reveal_all=True)
+
+
 async def _evaluate(problem_text, solution, topic, difficulty, request_like, session_id):
     """Shared evaluation used by the evaluate and legacy save endpoints."""
+    practice_problem_id = getattr(request_like, "practice_problem_id", "")
+    if practice_problem_id:
+        stored = _load_ai_problem(practice_problem_id, session_id)
+        judge_result = await _run_ai_samples(stored, solution, session_id)
+        result = await evaluate_ai_practice_solution(stored, problem_text, solution, judge_result)
+        if result.get("score") is not None:
+            result["score"] = max(0.0, min(10.0, float(result["score"])))
+        result["status"] = _status_label(result)
+        # AI-generated tests passing never makes an attempt "verified".
+        result["tier"] = get_question_tier(runner_supported=False)
+        return "", result, stored.get("title", "AI Practice Problem"), stored.get("topic", topic),             stored.get("difficulty", difficulty)
+
     question_id = extract_question_id_from_problem_text(problem_text)
     question = get_dsa_question_by_id(question_id) if question_id else None
 
@@ -363,13 +398,37 @@ async def run_dsa_solution(
     http_request: Request,
     session_id: str = Depends(get_current_session_id),
 ):
-    """Run hidden tests only (no AI review, nothing saved). Waits up to JUDGE_WAIT_SECONDS."""
+    """Run tests only (no AI review, nothing saved). Waits up to JUDGE_WAIT_SECONDS.
+
+    Curated bank questions run their hidden tests. AI practice problems run the
+    server-stored AI-generated sample tests, all of which are shown.
+    """
     enforce_rate_limit(http_request, bucket="judge", session_id=session_id)
+    if request.practice_problem_id:
+        stored = _load_ai_problem(request.practice_problem_id, session_id)
+        if not stored.get("executable"):
+            raise HTTPException(
+                status_code=409,
+                detail="No executable sample tests could be validated for this AI question. Submit for AI review instead.",
+            )
+        if not judge_available():
+            raise HTTPException(status_code=503, detail="The code judge is offline right now.")
+        result = await _run_ai_samples(stored, request.solution, session_id)
+        if result is None:
+            raise HTTPException(status_code=503, detail="The code judge is offline right now.")
+        return {
+            "question_id": "",
+            "practice_problem_id": request.practice_problem_id,
+            "test_source": "ai_generated_samples",
+            "cross_check": stored.get("cross_check", "not_run"),
+            **result,
+        }
+
     question = _bank_question_for_run(request)
     result = await judge_client.judge_and_wait(question, request.solution, session_id=session_id)
     if result is None:
         raise HTTPException(status_code=503, detail="The hidden-test judge is offline right now.")
-    return {"question_id": question["id"], **result}
+    return {"question_id": question["id"], "test_source": "hidden_tests", **result}
 
 
 @router.post("/dsa/submissions", status_code=202)

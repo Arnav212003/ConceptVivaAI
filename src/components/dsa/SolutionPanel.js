@@ -1,5 +1,6 @@
 import { IntegrityNotice, ScoreValue, UnavailableNotice } from "@/components/ui";
 import { TestCaseList, VerdictBanner } from "@/components/dsa/TestResults";
+import { AI_SAMPLES_NOTE, crossCheckNote } from "@/lib/testResults";
 
 function Block({ title, tone = "slate", children, right }) {
   const tones = {
@@ -52,6 +53,21 @@ export default function SolutionPanel({ feedback, solutionOnly, voiceControls, l
               <p className="mt-2 text-xs text-slate-400">{SCORING_LABEL[feedback.scoring_method]}</p>
             )}
           </div>
+          {feedback.execution && (
+            <div className="mb-5 rounded-2xl border border-amber-400/30 bg-amber-950/20 p-5" data-testid="sample-execution">
+              <p className="text-sm text-slate-400">Sample test execution (reported separately from the score)</p>
+              <p className="mt-1 text-2xl font-bold text-white">
+                {feedback.execution.total
+                  ? `${feedback.execution.passed}/${feedback.execution.total} passed · ${feedback.execution.verdict}`
+                  : feedback.execution.available
+                    ? "Could not run right now"
+                    : "No executable tests for this question"}
+              </p>
+              <p className="mt-2 text-xs text-amber-100/80">
+                {AI_SAMPLES_NOTE} {crossCheckNote(feedback.execution.cross_check)}
+              </p>
+            </div>
+          )}
           <Block title="Test Cases">
             <TestCaseList testCases={feedback.test_cases} />
           </Block>
