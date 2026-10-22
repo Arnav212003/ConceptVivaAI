@@ -17,6 +17,9 @@ import json
 import keyword
 import math
 import re
+from typing import get_args
+
+from services.grading.schemas import ValueType
 
 MIN_EXECUTABLE_TESTS = 2
 MAX_TESTS = 8
@@ -54,8 +57,21 @@ def _is_str(value) -> bool:
 
 _SCALARS = {"int": _is_int, "float": _is_float, "str": _is_str, "bool": lambda v: isinstance(v, bool)}
 
+# Single source of truth: the types Gemini is allowed to use (schemas.ValueType).
+SUPPORTED_TYPES = frozenset(get_args(ValueType))
+
+
+def python_type_hint(type_name: str) -> str:
+    """`list[list[int]]` -> `List[List[int]]` (typing.List is what the harness provides)."""
+    if type_name not in SUPPORTED_TYPES:
+        raise InvalidSignature(f"unsupported type {type_name!r}")
+    return type_name.replace("list[", "List[")
+
 
 def check_value(value, type_name: str) -> bool:
+    # Unknown types are a validation failure, never a KeyError.
+    if type_name not in SUPPORTED_TYPES:
+        return False
     if type_name in _SCALARS:
         return _SCALARS[type_name](value)
     if type_name.startswith("list[list[") and type_name.endswith("]]"):
@@ -82,12 +98,7 @@ def compare_mode(return_type: str, order_matters: bool) -> str:
 
 
 def build_starter_code(function_name: str, parameters: list[dict]) -> str:
-    hints = {
-        "int": "int", "float": "float", "str": "str", "bool": "bool",
-        "list[int]": "List[int]", "list[float]": "List[float]", "list[str]": "List[str]",
-        "list[bool]": "List[bool]", "list[list[int]]": "List[List[int]]", "list[list[str]]": "List[List[str]]",
-    }
-    args = ", ".join(f"{p['name']}: {hints[p['type']]}" for p in parameters)
+    args = ", ".join(f"{p['name']}: {python_type_hint(p['type'])}" for p in parameters)
     return (
         "class Solution:\n"
         f"    def {function_name}(self, {args}):\n"
@@ -106,7 +117,10 @@ def validate_signature(function_name: str, parameters: list[dict], return_type: 
         raise InvalidSignature("parameter names must be unique")
     if not all(_valid_identifier(name) for name in names):
         raise InvalidSignature("parameter names must be valid Python identifiers")
-    if return_type not in _SCALARS and not return_type.startswith("list["):
+    unsupported = [p["type"] for p in parameters if p.get("type") not in SUPPORTED_TYPES]
+    if unsupported:
+        raise InvalidSignature(f"unsupported parameter type {unsupported[0]!r}")
+    if return_type not in SUPPORTED_TYPES:
         raise InvalidSignature("unsupported return type")
 
 

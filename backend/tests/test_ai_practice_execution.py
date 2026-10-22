@@ -358,3 +358,82 @@ def test_submit_with_unknown_problem_id_is_404(client):
         "practice_problem_id": "aip_" + "f" * 24,
     })
     assert response.status_code == 404
+
+
+# ------------------------------------------------------------------ every supported type
+
+from typing import get_args  # noqa: E402
+
+from services.dsa_generated_tests import SUPPORTED_TYPES, python_type_hint  # noqa: E402
+from services.grading.schemas import ValueType  # noqa: E402
+
+# One valid and one invalid sample per ValueType. Adding a type to the schema
+# without adding it here makes test_every_value_type_has_samples fail.
+TYPE_SAMPLES = {
+    "int": (7, True),
+    "float": (2.5, "2.5"),
+    "str": ("abc", 3),
+    "bool": (False, 0),
+    "list[int]": ([1, 2], [1, False]),
+    "list[float]": ([1.5, 2], [1.5, "x"]),
+    "list[str]": (["a", "b"], ["a", 1]),
+    "list[bool]": ([True, False], [True, 1]),
+    "list[list[int]]": ([[1], [2, 3]], [[1], [True]]),
+    "list[list[str]]": ([["a"], []], [["a", 2]]),
+}
+
+
+def test_every_value_type_has_samples():
+    assert set(TYPE_SAMPLES) == set(get_args(ValueType)) == SUPPORTED_TYPES
+
+
+@pytest.mark.parametrize("type_name", get_args(ValueType))
+def test_every_value_type_builds_valid_starter_code(type_name):
+    import ast
+
+    params = [{"name": "value", "type": type_name}, {"name": "k", "type": "int"}]
+    validate_signature("useValue", params, type_name)  # no exception
+    code = build_starter_code("useValue", params)
+    assert f"def useValue(self, value: {python_type_hint(type_name)}, k: int):" in code
+    ast.parse("from typing import List\n" + code)
+
+
+@pytest.mark.parametrize("type_name", get_args(ValueType))
+def test_every_value_type_validates_values_and_tests(type_name):
+    good, bad = TYPE_SAMPLES[type_name]
+    assert check_value(good, type_name) is True
+    assert check_value(bad, type_name) is False
+
+    params = [{"name": "value", "type": type_name}]
+    accepted, _ = validate_tests(
+        [case({"value": good}, good), case({"value": bad}, good)], params, type_name
+    )
+    assert accepted == [{"args": [good], "expected": good}]
+
+
+@pytest.mark.parametrize("bad_type", ["list[dict]", "dict", "list[list[float]]", "None", "", "List[int]"])
+def test_unknown_types_are_rejected_without_key_errors(bad_type):
+    with pytest.raises(InvalidSignature):
+        validate_signature("f", [{"name": "x", "type": bad_type}], "int")
+    with pytest.raises(InvalidSignature):
+        validate_signature("f", [{"name": "x", "type": "int"}], bad_type)
+    with pytest.raises(InvalidSignature):
+        build_starter_code("f", [{"name": "x", "type": bad_type}])
+    assert check_value([1], bad_type) is False
+
+
+def test_list_bool_problem_runs_end_to_end(client, fake_llm, judge_up):
+    fake_llm.responses["AIPracticeProblemOutput"] = ai_problem(
+        tests=[({"flags": [True, False, True]}, 2), ({"flags": []}, 0), ({"flags": [False]}, 0)],
+        function_name="countTrue",
+        parameters=[{"name": "flags", "type": "list[bool]"}],
+        return_type="int",
+        reference_solution="class Solution:\n    def countTrue(self, flags):\n        return sum(flags)\n",
+    )
+    _, headers = start_test_session(client)
+    data = generate(client, headers)
+    assert data["execution"] == {"available": True, "test_count": 3, "cross_check": "cross_checked", "reason": ""}
+    assert "def countTrue(self, flags: List[bool]):" in data["problem_json"]["starter_code"]
+    result = run(client, headers, data["problem_json"]["practice_problem_id"],
+                 "class Solution:\n    def countTrue(self, flags):\n        return flags.count(True)\n").json()
+    assert (result["verdict"], result["passed"], result["total"]) == ("Accepted", 3, 3)
