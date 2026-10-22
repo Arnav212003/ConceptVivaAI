@@ -127,3 +127,18 @@ Phase 6 tests: backend `python -m pytest` → 171 passed; `npm test` → 27 pass
 - More hidden tests per curated question (currently 3).
 - Move guest sessions from localStorage to cookies as well.
 - Production load test and real usage numbers.
+
+## Follow-up — Code execution for AI-generated DSA problems
+
+| Item | Status | Notes |
+|---|---|---|
+| Executable signature + sample tests from Gemini | DONE | New prompt `ai_practice_problem@1.0.0` and schema `AIPracticeProblemOutput` (function name, typed parameters, return type, 5-8 tests as JSON strings, reference solution). The curated-bank prompt is unchanged. |
+| Validation of generated tests | DONE | `services/dsa_generated_tests.py`: identifier and signature checks, strict recursive type checks (bool is not int, finite floats), size limits, malformed/duplicate/conflicting cases dropped, starter code rebuilt server-side from the validated signature, comparison mode derived from the return type. |
+| Cross-check | DONE | When the judge is online, the AI reference solution runs on its own tests in the sandbox and only agreeing tests are kept; if too few remain the problem falls back to AI review. Both come from the same model, so results stay labelled AI-generated. |
+| Server-side storage | DONE | `services/ai_problem_store.py`: Redis (memory fallback), 6-hour TTL, bound to the generating session; only an opaque `practice_problem_id` reaches the browser. Tests and the reference solution are never returned; browser-supplied tests/runner fields are ignored (tested). |
+| Run Code | DONE | `/dsa/run` with `practice_problem_id` executes through the existing Redis queue, worker and sandbox; all sample cases shown with input, expected and actual output; `error_kind` distinguishes syntax errors; nothing is saved. |
+| Submit | DONE | Executes the stored tests, then AI rubric review with the execution summary as server-computed context. Score = AI rubric; execution reported separately (`execution` block); attempt saved with tier `ai_generated`, `judge_verdict`, `tests_passed/total`; `test_source` shown in Dashboard and History. Never labelled verified. |
+| Curated bank unchanged | DONE | Bank prompt, hidden-test visibility and verified tier unchanged; regression checked in tests and against Docker. |
+| Tests | DONE | Backend 197 passed (26 new), Vitest 33 passed (6 new), Playwright 14 passed (AI practice scenario added, desktop + mobile), lint clean, production build OK. |
+| Docker integration | DONE | Rebuilt api, worker, sandbox, frontend. Real Gemini + sandbox runs on two generated problems (`findPairSum` -> list[int], `isPalindrome` -> bool): cross-check kept 8/8 tests; reference solution Accepted 8/8; wrong answer, syntax error and infinite loop gave Wrong Answer, Compilation Error (syntax_error) and Time Limit Exceeded; forged tests ignored; other session 404; runs saved nothing; Submit scored by rubric and saved as `ai_generated`. A real browser run through the Docker frontend also passed. One generation attempt failed with Gemini HTTP 503 and correctly fell back to AI review. |
+

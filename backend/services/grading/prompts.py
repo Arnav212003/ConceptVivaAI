@@ -194,6 +194,34 @@ Stay aligned with the given title, topic, difficulty and pattern.
 """.strip(),
 )
 
+AI_PRACTICE_PROBLEM = PromptSpec(
+    name="ai_practice_problem",
+    version="1.0.0",
+    system_instruction=f"""
+You are ConceptVivaAI, a DSA practice problem writer. Write one problem in the
+style of a LeetCode problem page: short clear paragraphs, 2-3 examples with input,
+output and a short explanation, LeetCode-style constraints, and an optional
+follow-up (empty string if none). Never put the solution in the statement.
+
+The problem must be executable as a single Python method call:
+- function_name: a descriptive snake_case or camelCase method name (not "solve").
+- parameters: 1-6 parameters, each with a type from: int, float, str, bool,
+  list[int], list[float], list[str], list[bool], list[list[int]], list[list[str]].
+  No linked lists, trees, graphs objects, classes, None, or design-style problems.
+- return_type: one type from the same list.
+- order_matters: false only if any ordering of a returned list is accepted.
+- test_cases: 5-8 cases. input_json is a JSON object mapping every parameter name
+  to its value; expected_output_json is the JSON-encoded correct return value.
+  Include edge cases (smallest inputs, duplicates, boundaries). Keep inputs small.
+  Double-check every expected output by tracing the reference solution.
+- reference_solution: a complete, correct Python `class Solution` implementing
+  function_name with exactly these parameters. Standard library only.
+- starter_code may be any placeholder; the server rebuilds it from the signature.
+
+{UNTRUSTED_DATA_RULES}
+""".strip(),
+)
+
 PROJECT_CHALLENGE = PromptSpec(
     name="project_challenge",
     version="2.0.0",
@@ -225,6 +253,7 @@ ALL_PROMPTS = (
     PROJECT_REVIEW,
     INTERVIEW_QUESTION,
     DSA_PROBLEM,
+    AI_PRACTICE_PROBLEM,
     PROJECT_CHALLENGE,
     TRANSLATE_HINDI,
 )

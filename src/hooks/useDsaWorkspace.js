@@ -21,6 +21,8 @@ export default function useDsaWorkspace() {
   const [problem, setProblem] = useState("");
   const [problemData, setProblemData] = useState(null);
   const [tier, setTier] = useState(null);
+  // Execution info for AI practice problems: { available, test_count, cross_check, reason }.
+  const [execution, setExecution] = useState(null);
   const [solution, setSolution] = useState("");
   const [runResult, setRunResult] = useState(null);
   const [feedback, setFeedback] = useState(null);
@@ -38,6 +40,7 @@ export default function useDsaWorkspace() {
     setProblem("");
     setProblemData(null);
     setTier(null);
+    setExecution(null);
     setSolution("");
     setRunResult(null);
     setFeedback(null);
@@ -55,6 +58,7 @@ export default function useDsaWorkspace() {
         setProblem(data.problem || "");
         setProblemData(data.problem_json || null);
         setTier(data.tier || fallbackTier || null);
+        setExecution(data.execution || null);
         setSolution(data.problem_json?.starter_code || data.starter_code || DEFAULT_STARTER);
         return data;
       } catch (err) {
@@ -67,15 +71,31 @@ export default function useDsaWorkspace() {
     [reset]
   );
 
-  // "Run" never saves. Bank questions go to the isolated judge when it is online;
-  // otherwise it is a quick AI check.
+  const practiceProblemId = problemData?.practice_problem_id || "";
+
+  // "Run" never saves. Bank questions run hidden tests and AI practice problems run
+  // their server-stored sample tests in the isolated judge; without either it is a
+  // quick AI check.
   const run = useCallback(
     async ({ topic, difficulty, judgeEnabled }) => {
       setFlag("run", true);
       setRunResult(null);
       setError("");
       try {
-        if (judgeEnabled && problemData?.question_id) {
+        if (judgeEnabled && practiceProblemId && execution?.available) {
+          // Only the opaque id is sent; the server loads the tests itself.
+          const judge = await apiPost("/api/dsa", {
+            action: "run",
+            practice_problem_id: practiceProblemId,
+            solution,
+          });
+          setRunResult({
+            source: "ai_samples",
+            judge,
+            test_cases: judge.test_cases || [],
+            cross_check: judge.cross_check,
+          });
+        } else if (judgeEnabled && problemData?.question_id) {
           const judge = await apiPost("/api/dsa", {
             action: "run",
             question_id: problemData.question_id,
@@ -95,7 +115,7 @@ export default function useDsaWorkspace() {
         setActiveTab("testcase");
       }
     },
-    [problem, problemData, solution]
+    [execution, practiceProblemId, problem, problemData, solution]
   );
 
   const submit = useCallback(
@@ -114,10 +134,12 @@ export default function useDsaWorkspace() {
             solution,
             mode,
             save_attempt: true,
+            ...(practiceProblemId ? { practice_problem_id: practiceProblemId } : {}),
           })
         );
         setFeedback(data);
-        setRunResult({ source: data.judge ? "judge" : "ai", judge: data.judge, test_cases: data.test_cases });
+        const source = data.execution ? "ai_samples" : data.judge ? "judge" : "ai";
+        setRunResult({ source, judge: data.judge, test_cases: data.test_cases, cross_check: data.execution?.cross_check });
         if (data.tier) setTier(data.tier);
         setActiveTab("result");
         return data;
@@ -128,7 +150,7 @@ export default function useDsaWorkspace() {
         setFlag("submit", false);
       }
     },
-    [problem, solution]
+    [practiceProblemId, problem, solution]
   );
 
   const revealSolution = useCallback(
@@ -165,6 +187,7 @@ export default function useDsaWorkspace() {
     problem,
     problemData,
     tier,
+    execution,
     solution,
     setSolution,
     starterCode,

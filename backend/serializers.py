@@ -57,6 +57,13 @@ def serialize_interview_report(item):
     }
 
 
+def _dsa_test_source(item) -> str:
+    """Where tests_passed/tests_total came from. Derived, so old rows need no migration."""
+    if not (item.tests_total or 0):
+        return "none"
+    return "hidden_tests" if item.scoring_method == "hidden_tests" else "ai_generated_samples"
+
+
 def serialize_dsa_attempt(item):
     return {
         "id": item.id,
@@ -76,6 +83,7 @@ def serialize_dsa_attempt(item):
         "judge_verdict": item.judge_verdict or "",
         "tests_passed": item.tests_passed or 0,
         "tests_total": item.tests_total or 0,
+        "test_source": _dsa_test_source(item),
         "created_at": format_datetime(item.created_at),
     }
 

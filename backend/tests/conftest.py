@@ -60,9 +60,12 @@ def _reset_llm_and_cache():
     from redis_client import set_redis
     from services import llm
 
+    from services.ai_problem_store import clear_memory_store
+
     llm.set_llm_backend(None)
     set_redis(None)
     clear_memory_cache()
+    clear_memory_store()
     yield
     llm.set_llm_backend(None)
     set_redis(None)

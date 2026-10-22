@@ -39,7 +39,7 @@ class Worker:
             return None
         stdin_payload = json.dumps({"runner": job["runner"], "solution": job["solution"]})
         outcome = asyncio.run(self.executor.execute(stdin_payload, self.limits))
-        result = build_judge_result(outcome, job["total_tests"])
+        result = build_judge_result(outcome, job["total_tests"], reveal_all=bool(job.get("reveal_all")))
         result["submission_id"] = submission_id
         result["executor"] = self.executor.name
         queue.complete(self.redis, submission_id, result)

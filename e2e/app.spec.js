@@ -162,3 +162,78 @@ test("Google sign-in button starts the OAuth flow when enabled", async ({ page, 
   const request = await loginRequest;
   expect(new URL(request.url()).searchParams.get("return_to")).toBe("/dsa");
 });
+
+test("DSA AI practice: sample tests run in the judge but are never labelled verified", async ({ page }) => {
+  const problemId = "aip_0123456789abcdef01234567";
+  const cases = [
+    { status: "Passed", input: "[[1, 2, 3]]", expected_output: "5", actual_output: "5", hidden: false },
+    { status: "Failed", input: "[[5, 5]]", expected_output: "10", actual_output: "6", hidden: false },
+  ];
+  let runs = 0;
+  await mockApi(page, {
+    handlers: {
+      "/api/dsa": (body) => {
+        if (!body) return undefined;
+        if (body.action === "generateAI") {
+          return {
+            tier: "ai_generated",
+            execution: { available: true, test_count: 2, cross_check: "cross_checked", reason: "" },
+            problem: "Problem: Max Pair Sum",
+            problem_json: {
+              question_id: "", practice_problem_id: problemId, title: "Max Pair Sum", topic: "Arrays",
+              difficulty: "Easy", pattern: "AI Generated", description: "Return the largest pair sum.",
+              examples: [{ input: "nums = [1, 2, 3]", output: "5", explanation: "" }], constraints: [], follow_up: "",
+              starter_code: "class Solution:\n    def maxPairSum(self, nums):\n        pass", generated_by: "ai",
+            },
+          };
+        }
+        if (body.action === "run") {
+          expect(body).toEqual({ action: "run", practice_problem_id: problemId, solution: expect.any(String) });
+          runs += 1;
+          if (runs === 1) {
+            return { status: "finished", verdict: "Wrong Answer", passed: 1, total: 2, test_cases: cases,
+                     test_source: "ai_generated_samples", cross_check: "cross_checked", error_kind: "" };
+          }
+          return { status: "finished", verdict: "Compilation Error", error_kind: "syntax_error", passed: 0, total: 2,
+                   error: "SyntaxError: expected ':'", test_cases: [], test_source: "ai_generated_samples" };
+        }
+        if (body.action === "evaluate") {
+          expect(body.practice_problem_id).toBe(problemId);
+          return {
+            evaluation_status: "completed", score: 6, status: "Needs Improvement", tier: "ai_generated",
+            scoring_method: "ai_rubric", judge: { status: "finished", verdict: "Wrong Answer", passed: 1, total: 2 },
+            execution: { source: "ai_generated_samples", verified: false, cross_check: "cross_checked", available: true,
+                         verdict: "Wrong Answer", passed: 1, total: 2 },
+            test_cases: cases, feedback: "Handle duplicates.", optimized_approach: "Track two maxima.",
+            optimized_code: "class Solution: ...", explanation: "One pass.", time_complexity: "O(n)", space_complexity: "O(1)",
+            saved_attempt: { test_source: "ai_generated_samples", tests_passed: 1, tests_total: 2, judge_verdict: "Wrong Answer" },
+          };
+        }
+        return undefined;
+      },
+    },
+  });
+
+  await page.goto("/dsa/practice");
+  await page.getByRole("button", { name: "🤖 AI Practice (Any Topic)" }).click();
+  await page.getByLabel("DSA Topic").fill("Arrays");
+  await page.getByRole("button", { name: "Generate Problem" }).click();
+  await expect(page.getByRole("heading", { name: "Max Pair Sum" })).toBeVisible();
+  await expect(page.getByText("🤖 AI Generated", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "▶ Run Code" }).click();
+  await expect(page.getByTestId("verdict")).toHaveText("Wrong Answer");
+  await expect(page.getByTestId("ai-samples-note")).toContainText("not independently verified");
+  await expect(page.getByText("[[5, 5]]")).toBeVisible();
+  await expect(page.getByText("6", { exact: true })).toBeVisible();
+
+  await page.getByRole("tab", { name: /Code/ }).click();
+  await page.getByRole("button", { name: "▶ Run Code" }).click();
+  await expect(page.getByTestId("error-kind")).toHaveText("Syntax Error");
+
+  await page.getByRole("tab", { name: /Code/ }).click();
+  await page.getByRole("button", { name: "Submit", exact: true }).click();
+  await expect(page.getByTestId("dsa-score")).toHaveText("6/10");
+  await expect(page.getByTestId("sample-execution")).toContainText("1/2 passed · Wrong Answer");
+  await expect(page.getByText("✅ Verified", { exact: true })).toHaveCount(0);
+});

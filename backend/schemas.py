@@ -42,6 +42,9 @@ class DSAEvaluateRequest(BaseModel):
     solution: str = Field(min_length=1, max_length=30000)
     mode: str = Field(default="Practice", max_length=30)
     save_attempt: bool = False
+    # Opaque id of a server-stored AI practice problem. Tests are never accepted
+    # from the client; they are loaded server-side by this id.
+    practice_problem_id: str = Field(default="", max_length=40)
 
 
 class DSAMockSetRequest(BaseModel):
@@ -154,5 +157,6 @@ class TranslateRequest(BaseModel):
 class DSARunRequest(BaseModel):
     # Either a bank question id, or a problem text containing "Question ID: ...".
     question_id: str = Field(default="", max_length=100)
+    practice_problem_id: str = Field(default="", max_length=40)
     problem: str = Field(default="", max_length=30000)
     solution: str = Field(min_length=1, max_length=30000)

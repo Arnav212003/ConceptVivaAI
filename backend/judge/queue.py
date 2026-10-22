@@ -42,7 +42,8 @@ def submission_key(submission_id: str) -> str:
     return f"{SUBMISSION_PREFIX}{submission_id}"
 
 
-def enqueue(redis, *, session_id: str, question_id: str, runner: dict, solution: str) -> str:
+def enqueue(redis, *, session_id: str, question_id: str, runner: dict, solution: str,
+            reveal_all: bool = False) -> str:
     if redis.llen(QUEUE_KEY) >= MAX_QUEUE_LENGTH:
         raise QueueFullError("judge queue is full")
     submission_id = "sub_" + secrets.token_hex(12)
@@ -52,7 +53,7 @@ def enqueue(redis, *, session_id: str, question_id: str, runner: dict, solution:
         "status": STATUS_QUEUED,
         "session_id": session_id,
         "question_id": question_id,
-        "payload": json.dumps({"runner": runner, "solution": solution}),
+        "payload": json.dumps({"runner": runner, "solution": solution, "reveal_all": bool(reveal_all)}),
         "total_tests": len(runner.get("tests", [])),
         "attempts": 0,
         "created_at": time.time(),
