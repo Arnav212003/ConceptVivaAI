@@ -10,6 +10,7 @@ services:
     dockerfilePath: ./Dockerfile
     dockerCommand: sh start.sh
     plan: free
+    region: singapore
     healthCheckPath: /health
     envVars:
       - key: APP_ENV
@@ -59,4 +60,5 @@ services:
   - type: keyvalue
     name: conceptviva-redis
     plan: free
+    region: singapore
     ipAllowList: []            # reachable only from Render services in this account
