@@ -103,6 +103,11 @@ I check the types, run the reference against its own tests and drop the ones it
 fails. Those results are never labelled "Verified", because the tests and the
 reference come from the same model.
 
+While testing the worker in Docker I noticed it logged a TimeoutError every few
+seconds even with an empty queue. The worker was waiting 5 seconds on BLMOVE but the
+Redis client gave up on the socket after 2, so I made the wait shorter than the
+socket timeout.
+
 ### Measuring the grader
 
 `backend/benchmarks/grader` compares the grader with human scores (MAE, correlation,
@@ -119,6 +124,12 @@ has no background workers and no pre-deploy step. `backend/start.sh` runs the
 migrations, starts the worker in the background (and restarts it if it exits), then
 starts the API, all in one container. In my local Docker test it idled at about
 117 MB, under the free plan's 512 MB.
+
+Getting it live took longer than writing the config. I first planned to use
+RapidAPI's free Judge0 plan for the live judge, but when I opened the pricing page
+it had become pay per use, so I turned the judge off in the live deploy instead of
+adding a card. Render also allows only one free Redis per workspace, and my
+attendance project was already using it, so I made a separate workspace for this one.
 
 ## Tech stack
 
@@ -200,6 +211,10 @@ There is no free Judge0 plan anymore, so the judge is off there. To turn it on, 
 Judge0 endpoint (RapidAPI's Judge0 CE is pay per use) and set `JUDGE_ENABLED=true`,
 `JUDGE0_URL` and `JUDGE0_API_KEY` in Render. `JUDGE0_DAILY_LIMIT` caps how many
 Judge0 requests the backend makes per day.
+
+One mistake I almost made: render.yaml had no region, so Render would have put the
+API in Oregon while my Neon database is in Singapore. Every query would have crossed
+the Pacific, so I set both services to Singapore.
 
 ## Known limitations
 
