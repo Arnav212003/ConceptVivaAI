@@ -1,6 +1,6 @@
 # Render Blueprint for the backend on the free plan: one web service that runs
 # migrations, the judge worker and the API (see backend/start.sh), plus Redis.
-# Frontend: Vercel. Database: Neon. Code execution: Judge0 CE on RapidAPI.
+# Frontend: Vercel. Database: Neon. The judge is off; see the README to turn it on.
 # Values marked `sync: false` are entered in the Render dashboard, never committed.
 services:
   - type: web
@@ -36,7 +36,7 @@ services:
       - key: TRUSTED_PROXY_HOPS
         value: "2"             # Vercel function -> Render proxy -> app
       - key: JUDGE_ENABLED
-        value: "true"
+        value: "false"         # needs a paid Judge0 endpoint
       - key: JUDGE_EXECUTOR
         value: judge0
       - key: JUDGE0_URL
@@ -44,7 +44,7 @@ services:
       - key: JUDGE0_API_KEY
         sync: false            # RapidAPI key
       - key: JUDGE0_DAILY_LIMIT
-        value: "50"            # RapidAPI Basic plan
+        value: "50"
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET

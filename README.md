@@ -170,21 +170,20 @@ so this covers known patterns only. No human-agreement numbers are claimed yet.
 ## Deployment
 
 Everything below runs on free plans. The frontend goes on Vercel, the database on
-Neon, the backend and Redis on Render, and code runs on Judge0 through RapidAPI.
+Neon, and the backend and Redis on Render. The code judge is switched off here,
+because there is no free Judge0 plan anymore.
 
 1. Neon: create a project and copy the connection string. It looks like
    `postgresql://user:password@host/db?sslmode=require`.
-2. Judge0: sign up on RapidAPI, subscribe to the Judge0 CE "Basic" plan (free) and
-   copy your RapidAPI key.
-3. Render: create a new Blueprint from this repo. It reads `render.yaml` and makes
+2. Render: create a new Blueprint from this repo. It reads `render.yaml` and makes
    one free web service and a free Redis. Fill in the values it asks for: the Neon
-   URL, your Gemini key, the RapidAPI key, and your Vercel URL for `FRONTEND_URL`
-   and `CORS_ORIGINS`. The Google values are optional.
-4. Vercel: import the repo and set `PYTHON_BACKEND_URL` to your Render URL.
-5. Google sign-in (optional): create an OAuth client in Google Cloud Console, set the
+   URL, your Gemini key, and your Vercel URL for `FRONTEND_URL` and `CORS_ORIGINS`.
+   The Google and Judge0 values are optional.
+3. Vercel: import the repo and set `PYTHON_BACKEND_URL` to your Render URL.
+4. Google sign-in (optional): create an OAuth client in Google Cloud Console, set the
    redirect URI to `https://<your-vercel-app>/api/auth/google/callback`, and put the
    ID and secret into Render.
-6. Open `https://<your-render-app>/health`. You should see `"status": "ok"`.
+5. Open `https://<your-render-app>/health`. You should see `"status": "ok"`.
 
 How the free setup works:
 
@@ -192,12 +191,14 @@ Render's free plan has no background workers and no pre-deploy step, so
 `backend/start.sh` does everything in one container. It runs the migrations, starts
 the judge worker in the background (and restarts it if it crashes), then starts the API.
 
-The Basic Judge0 plan allows 50 requests a day, and every call counts. Each Run or
-Submit uses one request, because the backend asks Judge0 to wait for the result
-instead of polling. Generating an AI practice question uses one more request to
-check its tests. The backend counts requests in Redis (`JUDGE0_DAILY_LIMIT=50`).
-When the limit is reached, the judge shows as offline and answers fall back to AI
-review until the next day (UTC).
+With the judge off, curated DSA answers are reviewed by the AI and labelled
+"AI Generated" instead of "Verified". AI practice questions work the same way.
+Hidden-test judging still works locally with `docker compose up --build`, which
+runs the sandbox.
+
+To turn the judge on later, get a Judge0 endpoint (RapidAPI's Judge0 CE is pay per
+use) and set `JUDGE_ENABLED=true`, `JUDGE0_URL` and `JUDGE0_API_KEY` in Render.
+`JUDGE0_DAILY_LIMIT` caps how many Judge0 requests the backend makes per day.
 
 A free Render service sleeps after about 15 minutes without traffic, so the first
 request after that takes around a minute. The free Redis is not persistent, which
