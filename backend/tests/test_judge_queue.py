@@ -107,3 +107,43 @@ def test_sandbox_clamps_requested_limits():
     assert limits.cpu_seconds <= 4
     assert limits.memory_mb <= 512
     assert limits.wall_seconds <= 10
+
+
+def fake_judge0(monkeypatch, responses):
+    import base64
+    import httpx
+
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        status_id = responses.pop(0)
+        stdout = base64.b64encode(b'__CV_RESULT__{"phase": "tests", "results": []}').decode()
+        return httpx.Response(200, json={"token": "t1", "status": {"id": status_id}, "stdout": stdout, "time": "0.1"})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    return seen
+
+
+def test_judge0_uses_one_request_with_rapidapi_headers(monkeypatch):
+    import asyncio
+
+    seen = fake_judge0(monkeypatch, [3])
+    executor = Judge0Executor("https://judge0-ce.p.rapidapi.com", "key123")
+    outcome = asyncio.run(executor.execute("{}", LIMITS))
+    assert outcome.status == "ok"
+    assert len(seen) == 1
+    assert seen[0].url.params["wait"] == "true"
+    assert seen[0].headers["X-RapidAPI-Key"] == "key123"
+    assert seen[0].headers["X-RapidAPI-Host"] == "judge0-ce.p.rapidapi.com"
+
+
+def test_judge0_polls_only_while_still_processing(monkeypatch):
+    import asyncio
+
+    seen = fake_judge0(monkeypatch, [2, 3])
+    outcome = asyncio.run(Judge0Executor("http://judge0:2358", "tok").execute("{}", LIMITS))
+    assert outcome.status == "ok"
+    assert [r.method for r in seen] == ["POST", "GET"]
+    assert seen[0].headers["X-Auth-Token"] == "tok"

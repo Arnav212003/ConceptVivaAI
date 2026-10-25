@@ -17,6 +17,7 @@ import base64
 import json
 import time
 from dataclasses import asdict
+from urllib.parse import urlparse
 
 import httpx
 
@@ -119,10 +120,11 @@ class Judge0Executor:
         self.url = url
         self.language_id = language_id
         self.headers = {"Content-Type": "application/json"}
-        if api_key:
-            # Self-hosted Judge0 uses X-Auth-Token; RapidAPI-hosted uses X-RapidAPI-Key.
-            header = "X-RapidAPI-Key" if "rapidapi" in url else "X-Auth-Token"
-            self.headers[header] = api_key
+        if api_key and "rapidapi" in url:
+            self.headers["X-RapidAPI-Key"] = api_key
+            self.headers["X-RapidAPI-Host"] = urlparse(url).hostname
+        elif api_key:
+            self.headers["X-Auth-Token"] = api_key
 
     def submission_body(self, stdin_payload: str, limits: Limits) -> dict:
         return {
@@ -141,27 +143,24 @@ class Judge0Executor:
 
     async def execute(self, stdin_payload: str, limits: Limits) -> ExecutionOutcome:
         body = self.submission_body(stdin_payload, limits)
-        fields = "stdout,stderr,compile_output,status,time,memory,message"
+        params = {"base64_encoded": "true", "fields": "token,stdout,stderr,compile_output,status,time,memory,message"}
         try:
             async with httpx.AsyncClient(timeout=limits.wall_seconds + 15, headers=self.headers) as client:
-                created = await client.post(
-                    f"{self.url}/submissions", params={"base64_encoded": "true", "wait": "false"}, json=body
-                )
+                # wait=true returns the finished result in one request; RapidAPI's free plan counts every call.
+                created = await client.post(f"{self.url}/submissions", params={**params, "wait": "true"}, json=body)
                 created.raise_for_status()
-                token = created.json()["token"]
+                data = created.json()
                 deadline = time.monotonic() + limits.wall_seconds + 20
-                while time.monotonic() < deadline:
-                    polled = await client.get(
-                        f"{self.url}/submissions/{token}", params={"base64_encoded": "true", "fields": fields}
-                    )
+                while int((data.get("status") or {}).get("id", 1)) in _JUDGE0_PENDING:
+                    if time.monotonic() >= deadline:
+                        return ExecutionOutcome(status="internal_error", detail="judge0: result polling timed out")
+                    await asyncio.sleep(1)
+                    polled = await client.get(f"{self.url}/submissions/{data['token']}", params=params)
                     polled.raise_for_status()
                     data = polled.json()
-                    if int((data.get("status") or {}).get("id", 1)) not in _JUDGE0_PENDING:
-                        return judge0_outcome(data, limits)
-                    await asyncio.sleep(0.25)
+                return judge0_outcome(data, limits)
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             return ExecutionOutcome(status="internal_error", detail=f"judge0: {type(exc).__name__}")
-        return ExecutionOutcome(status="internal_error", detail="judge0: result polling timed out")
 
 
 class ExecutorNotConfigured(RuntimeError):
