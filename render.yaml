@@ -1,6 +1,6 @@
-# Render Blueprint for the backend (API + judge worker + Redis).
-# Frontend: Vercel. Database: Neon PostgreSQL. Code execution: Judge0 (Render
-# cannot apply the container hardening flags the self-hosted sandbox needs).
+# Render Blueprint for the backend on the free plan: one web service that runs
+# migrations, the judge worker and the API (see backend/start.sh), plus Redis.
+# Frontend: Vercel. Database: Neon. Code execution: Judge0 CE on RapidAPI.
 # Values marked `sync: false` are entered in the Render dashboard, never committed.
 services:
   - type: web
@@ -8,12 +8,14 @@ services:
     runtime: docker
     rootDir: backend
     dockerfilePath: ./Dockerfile
-    plan: starter
+    dockerCommand: sh start.sh
+    plan: free
     healthCheckPath: /health
-    preDeployCommand: alembic upgrade head
     envVars:
       - key: APP_ENV
         value: production
+      - key: WEB_CONCURRENCY
+        value: "1"             # free instances have 512 MB
       - key: DATABASE_URL
         sync: false            # Neon: postgresql://USER:PASSWORD@HOST/DB?sslmode=require
       - key: REDIS_URL
@@ -35,7 +37,14 @@ services:
         value: "2"             # Vercel function -> Render proxy -> app
       - key: JUDGE_ENABLED
         value: "true"
-      - fromGroup: conceptviva-judge
+      - key: JUDGE_EXECUTOR
+        value: judge0
+      - key: JUDGE0_URL
+        value: https://judge0-ce.p.rapidapi.com
+      - key: JUDGE0_API_KEY
+        sync: false            # RapidAPI key
+      - key: JUDGE0_DAILY_LIMIT
+        value: "50"            # RapidAPI Basic plan
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
@@ -47,36 +56,7 @@ services:
       - key: ANALYTICS_ADMIN_TOKEN
         generateValue: true
 
-  - type: worker
-    name: conceptviva-judge-worker
-    runtime: docker
-    rootDir: backend
-    dockerfilePath: ./Dockerfile
-    dockerCommand: python -m judge.worker
-    plan: starter
-    envVars:
-      - fromGroup: conceptviva-judge
-      - key: DATABASE_URL
-        sync: false
-      - key: SESSION_SECRET_KEY
-        sync: false            # copy the API's value; config requires it
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: conceptviva-redis
-          property: connectionString
-
   - type: keyvalue
     name: conceptviva-redis
     plan: free
     ipAllowList: []            # reachable only from Render services in this account
-
-envVarGroups:
-  - name: conceptviva-judge
-    envVars:
-      - key: JUDGE_EXECUTOR
-        value: judge0
-      - key: JUDGE0_URL
-        sync: false
-      - key: JUDGE0_API_KEY
-        sync: false
