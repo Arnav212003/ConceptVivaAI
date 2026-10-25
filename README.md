@@ -169,20 +169,43 @@ so this covers known patterns only. No human-agreement numbers are claimed yet.
 
 ## Deployment
 
-1. **Database (Neon).** Create a project and copy the connection string
-   (`postgresql://...?sslmode=require`).
-2. **Code execution (Judge0).** Use a self-hosted Judge0 CE on a VM, or a hosted
-   Judge0 endpoint. Note `JUDGE0_URL` and the API key.
-3. **Backend (Render).** New Blueprint from `render.yaml`. This creates the API, the
-   judge worker and Redis. Fill in the `sync: false` values (DATABASE_URL, GEMINI_API_KEY,
-   FRONTEND_URL, CORS_ORIGINS, JUDGE0_URL/KEY, Google OAuth values). Migrations run as
-   the pre-deploy command.
-4. **Frontend (Vercel).** Import the repo and set `PYTHON_BACKEND_URL` to the Render
-   API URL.
-5. **Google sign-in (optional).** In Google Cloud Console create an OAuth client (Web).
-   Set the authorized redirect URI to `https://<vercel-app>/api/auth/google/callback`
-   and copy the ID and secret into Render.
-6. Visit `/health` on the API and run the Locust test against the deployed URL.
+Everything below runs on free plans. The frontend goes on Vercel, the database on
+Neon, the backend and Redis on Render, and code runs on Judge0 through RapidAPI.
+
+1. Neon: create a project and copy the connection string. It looks like
+   `postgresql://user:password@host/db?sslmode=require`.
+2. Judge0: sign up on RapidAPI, subscribe to the Judge0 CE "Basic" plan (free) and
+   copy your RapidAPI key.
+3. Render: create a new Blueprint from this repo. It reads `render.yaml` and makes
+   one free web service and a free Redis. Fill in the values it asks for: the Neon
+   URL, your Gemini key, the RapidAPI key, and your Vercel URL for `FRONTEND_URL`
+   and `CORS_ORIGINS`. The Google values are optional.
+4. Vercel: import the repo and set `PYTHON_BACKEND_URL` to your Render URL.
+5. Google sign-in (optional): create an OAuth client in Google Cloud Console, set the
+   redirect URI to `https://<your-vercel-app>/api/auth/google/callback`, and put the
+   ID and secret into Render.
+6. Open `https://<your-render-app>/health`. You should see `"status": "ok"`.
+
+How the free setup works:
+
+Render's free plan has no background workers and no pre-deploy step, so
+`backend/start.sh` does everything in one container. It runs the migrations, starts
+the judge worker in the background (and restarts it if it crashes), then starts the API.
+
+The Basic Judge0 plan allows 50 requests a day, and every call counts. Each Run or
+Submit uses one request, because the backend asks Judge0 to wait for the result
+instead of polling. Generating an AI practice question uses one more request to
+check its tests. The backend counts requests in Redis (`JUDGE0_DAILY_LIMIT=50`).
+When the limit is reached, the judge shows as offline and answers fall back to AI
+review until the next day (UTC).
+
+A free Render service sleeps after about 15 minutes without traffic, so the first
+request after that takes around a minute. The free Redis is not persistent, which
+is fine here: it only holds the judge queue, rate limits, the cache and AI practice
+questions, which expire anyway.
+
+If you want to run the whole stack yourself instead, `docker compose up --build`
+starts everything locally, including the self-hosted sandbox.
 
 ## Known limitations
 
