@@ -27,6 +27,8 @@ RETENTION_SECONDS = 60 * 60
 HEARTBEAT_TTL_SECONDS = 30
 MAX_ATTEMPTS = 2
 MAX_QUEUE_LENGTH = 500
+# Must stay below redis_client.SOCKET_TIMEOUT_SECONDS, or an idle BLMOVE times out the socket.
+CLAIM_BLOCK_SECONDS = 1.0
 
 STATUS_QUEUED = "queued"
 STATUS_RUNNING = "running"
@@ -64,7 +66,7 @@ def enqueue(redis, *, session_id: str, question_id: str, runner: dict, solution:
     return submission_id
 
 
-def claim(redis, block_seconds: float = 5.0) -> Optional[str]:
+def claim(redis, block_seconds: float = CLAIM_BLOCK_SECONDS) -> Optional[str]:
     if block_seconds > 0:
         return redis.blmove(QUEUE_KEY, PROCESSING_KEY, block_seconds, "RIGHT", "LEFT")
     return redis.lmove(QUEUE_KEY, PROCESSING_KEY, "RIGHT", "LEFT")

@@ -10,6 +10,8 @@ from typing import Optional
 
 from config import settings
 
+SOCKET_TIMEOUT_SECONDS = 2
+
 _client = None
 _initialized = False
 
@@ -24,8 +26,8 @@ def get_redis():
             _client = redis.Redis.from_url(
                 settings.redis_url,
                 decode_responses=True,
-                socket_timeout=2,
-                socket_connect_timeout=2,
+                socket_timeout=SOCKET_TIMEOUT_SECONDS,
+                socket_connect_timeout=SOCKET_TIMEOUT_SECONDS,
                 health_check_interval=30,
             )
     return _client

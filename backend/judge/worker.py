@@ -53,7 +53,7 @@ class Worker:
                   duration_ms=result.get("duration_ms"))
         return result
 
-    def process_one(self, block_seconds: float = 5.0) -> dict | None:
+    def process_one(self, block_seconds: float = queue.CLAIM_BLOCK_SECONDS) -> dict | None:
         queue.beat(self.redis, self.worker_id)
         submission_id = queue.claim(self.redis, block_seconds)
         if submission_id is None:

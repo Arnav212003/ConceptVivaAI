@@ -174,3 +174,22 @@ def test_judge_offline_when_judge0_budget_is_used_up(fake_redis, override_settin
     judge_client.reset_availability_cache()
     assert judge_client.judge_available() is False
     judge_client.reset_availability_cache()
+
+
+def test_idle_claim_returns_none_without_socket_timeout(fake_redis):
+    import redis
+
+    from redis_client import SOCKET_TIMEOUT_SECONDS
+
+    class SocketTimeoutRedis:
+        def set(self, *args, **kwargs):
+            pass
+
+        def blmove(self, src, dst, timeout, *args):
+            if timeout >= SOCKET_TIMEOUT_SECONDS:
+                raise redis.exceptions.TimeoutError("Timeout reading from socket")
+            return None
+
+    assert queue.CLAIM_BLOCK_SECONDS < SOCKET_TIMEOUT_SECONDS
+    assert Worker(SocketTimeoutRedis(), LocalExecutor(), LIMITS).process_one() is None
+    assert queue.claim(fake_redis) is None
