@@ -147,3 +147,30 @@ def test_judge0_polls_only_while_still_processing(monkeypatch):
     assert outcome.status == "ok"
     assert [r.method for r in seen] == ["POST", "GET"]
     assert seen[0].headers["X-Auth-Token"] == "tok"
+
+
+def test_judge0_daily_limit_stops_requests(monkeypatch, fake_redis, override_settings):
+    import asyncio
+
+    override_settings(judge0_daily_limit=2)
+    seen = fake_judge0(monkeypatch, [3, 3, 3])
+    executor = Judge0Executor("https://judge0-ce.p.rapidapi.com", "key")
+    results = [asyncio.run(executor.execute("{}", LIMITS)) for _ in range(3)]
+    assert [r.status for r in results] == ["ok", "ok", "internal_error"]
+    assert "daily request limit" in results[2].detail
+    assert len(seen) == 2
+
+
+def test_judge_offline_when_judge0_budget_is_used_up(fake_redis, override_settings):
+    from judge import client as judge_client
+    from judge.executors import judge0_calls_key
+
+    override_settings(judge_enabled=True, judge_executor="judge0", judge0_url="https://judge0-ce.p.rapidapi.com",
+                      judge0_daily_limit=2)
+    fake_redis.set("cv:judge:heartbeat", "w", ex=30)
+    judge_client.reset_availability_cache()
+    assert judge_client.judge_available() is True
+    fake_redis.set(judge0_calls_key(), 2)
+    judge_client.reset_availability_cache()
+    assert judge_client.judge_available() is False
+    judge_client.reset_availability_cache()

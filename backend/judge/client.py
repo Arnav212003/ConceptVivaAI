@@ -9,7 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from config import settings
 from judge import queue
-from judge.executors import executor_configured
+from judge.executors import executor_configured, judge0_budget_left
 from redis_client import get_redis
 
 _AVAILABILITY_TTL = 5.0
@@ -29,6 +29,8 @@ def judge_available() -> bool:
         return _availability_cache["value"]
     try:
         value = queue.worker_alive(redis)
+        if settings.judge_executor == "judge0":
+            value = value and judge0_budget_left(redis)
     except Exception:
         value = False
     _availability_cache.update(checked_at=now, value=value)

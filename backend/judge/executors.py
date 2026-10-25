@@ -25,6 +25,7 @@ from config import settings
 from judge.process_runner import Limits, harness_source, run_harness
 from judge.signing import sign_sandbox_request
 from judge.verdicts import ExecutionOutcome
+from redis_client import get_redis
 
 
 def default_limits() -> Limits:
@@ -113,6 +114,25 @@ def judge0_outcome(data: dict, limits: Limits) -> ExecutionOutcome:
                             extra={"judge0_status": status_id, "memory_kb": memory_kb})
 
 
+def judge0_calls_key() -> str:
+    return f"cv:judge0:calls:{time.strftime('%Y-%m-%d', time.gmtime())}"
+
+
+def judge0_budget_left(redis) -> bool:
+    if not settings.judge0_daily_limit or redis is None:
+        return True
+    return int(redis.get(judge0_calls_key()) or 0) < settings.judge0_daily_limit
+
+
+def spend_judge0_request() -> bool:
+    redis = get_redis()
+    if not settings.judge0_daily_limit or redis is None:
+        return True
+    count = redis.incr(judge0_calls_key())
+    redis.expire(judge0_calls_key(), 2 * 24 * 3600)
+    return count <= settings.judge0_daily_limit
+
+
 class Judge0Executor:
     name = "judge0"
 
@@ -147,6 +167,8 @@ class Judge0Executor:
         try:
             async with httpx.AsyncClient(timeout=limits.wall_seconds + 15, headers=self.headers) as client:
                 # wait=true returns the finished result in one request; RapidAPI's free plan counts every call.
+                if not spend_judge0_request():
+                    return ExecutionOutcome(status="internal_error", detail="judge0: daily request limit reached")
                 created = await client.post(f"{self.url}/submissions", params={**params, "wait": "true"}, json=body)
                 created.raise_for_status()
                 data = created.json()
@@ -155,6 +177,8 @@ class Judge0Executor:
                     if time.monotonic() >= deadline:
                         return ExecutionOutcome(status="internal_error", detail="judge0: result polling timed out")
                     await asyncio.sleep(1)
+                    if not spend_judge0_request():
+                        return ExecutionOutcome(status="internal_error", detail="judge0: daily request limit reached")
                     polled = await client.get(f"{self.url}/submissions/{data['token']}", params=params)
                     polled.raise_for_status()
                     data = polled.json()

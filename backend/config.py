@@ -90,6 +90,7 @@ class Settings:
     judge0_url: str
     judge0_api_key: str
     judge0_python_language_id: int
+    judge0_daily_limit: int
     sandbox_url: str
     sandbox_shared_secret: str
     judge_allow_unsafe_local: bool
@@ -169,6 +170,8 @@ def load_settings() -> Settings:
         judge0_url=_env("JUDGE0_URL").rstrip("/"),
         judge0_api_key=_env("JUDGE0_API_KEY"),
         judge0_python_language_id=_env_int("JUDGE0_PYTHON_LANGUAGE_ID", 71),
+        # 0 means no limit. RapidAPI's free plan allows 50 requests a day.
+        judge0_daily_limit=_env_int("JUDGE0_DAILY_LIMIT", 0),
         sandbox_url=_env("SANDBOX_URL").rstrip("/"),
         sandbox_shared_secret=_env("SANDBOX_SHARED_SECRET"),
         judge_allow_unsafe_local=_env_bool("JUDGE_ALLOW_UNSAFE_LOCAL", False),
