@@ -132,7 +132,7 @@ sandbox and the frontend on http://localhost:3000, with hidden-test judging enab
 
 | Suite | Command | Result at last run |
 |---|---|---|
-| Backend unit/integration | `cd backend && python -m pytest` | 197 passed |
+| Backend unit/integration | `cd backend && python -m pytest` | 230 passed |
 | Frontend unit/component | `npm test` | 33 passed |
 | End-to-end (desktop + mobile Chromium) | `npm run test:e2e` | 14 passed |
 | Lint / build | `npm run lint`, `npm run build` | clean / OK |
