@@ -62,7 +62,7 @@ sequenceDiagram
     U->>API: POST /evaluate-dsa-solution (bank question)
     API->>Q: LPUSH submission (code, hidden tests)
     W->>Q: BLMOVE queue -> processing
-    W->>S: run harness (CPU, memory, process, output limits; no network)
+    W->>S: run harness (CPU, memory, process, output limits, no network)
     S-->>W: per-test results
     W->>Q: store verdict, delete source
     API->>Q: poll result (bounded wait)
